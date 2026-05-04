@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CitationBuilder</title>
   <link rel="icon" href="/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="theme-color" content="#0b1f3a">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#0b1f3a">
   <meta name="description" content="Marine Corps award Summary of Action and citation drafting aid." />
   <style>
     :root {
@@ -161,6 +161,8 @@
     button.secondary { background: #475569; }
     button.gold { background: #9a741f; }
     button.danger { background: #991b1b; }
+    button.ai { background: #5b21b6; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
 
     .output-box {
       border: 1px solid var(--border);
@@ -465,6 +467,8 @@
       const [citation, setCitation] = useState('');
       const [notes, setNotes] = useState([]);
       const [copied, setCopied] = useState('');
+      const [aiBusy, setAiBusy] = useState(false);
+      const [aiMessage, setAiMessage] = useState('');
 
       function update(field, value) {
         setForm(prev => ({ ...prev, [field]: value }));
@@ -479,6 +483,7 @@
         setCitation(nextCitation);
         setNotes(validate(form, nextCitation, lines));
         setCopied('');
+        setAiMessage('');
       }
 
       function clearForm() {
@@ -487,6 +492,47 @@
         setCitation('');
         setNotes([]);
         setCopied('');
+        setAiMessage('');
+      }
+
+      async function improveWithAI() {
+        const currentSoa = soa.trim();
+        const currentCitation = citation.trim();
+
+        if (!currentSoa || !currentCitation) {
+          setAiMessage('Generate a draft first, then use AI to improve phrasing.');
+          return;
+        }
+
+        setAiBusy(true);
+        setAiMessage('Improving wording with AI...');
+
+        try {
+          const response = await fetch('/api/improve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ form, soa: currentSoa, citation: currentCitation })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'AI request failed.');
+          }
+
+          setSoa(data.soa || currentSoa);
+          setCitation(data.citation || currentCitation);
+
+          const lines = cleanAchievementLines(form.achievements);
+          const validationNotes = validate(form, data.citation || currentCitation, lines);
+          const aiNotes = (data.notes || []).map(text => ({ type: 'warn', text: `AI note: ${text}` }));
+          setNotes([...validationNotes, ...aiNotes]);
+          setAiMessage('AI wording pass complete. Review carefully before routing.');
+        } catch (err) {
+          setAiMessage(err.message || 'AI improvement failed.');
+        } finally {
+          setAiBusy(false);
+        }
       }
 
       async function copyText(label, text) {
@@ -590,10 +636,12 @@
 
               <div className="button-row">
                 <button className="secondary" onClick={() => copyText('Citation', citation)}>Copy Citation</button>
+                <button className="ai" onClick={improveWithAI} disabled={aiBusy}>{aiBusy ? 'Improving...' : 'Improve Wording with AI'}</button>
                 <button className="gold" onClick={exportTxt}>Export .txt</button>
               </div>
 
               {copied && <p className="good"><strong>{copied}</strong></p>}
+              {aiMessage && <p className={aiMessage.toLowerCase().includes('failed') || aiMessage.toLowerCase().includes('generate') ? 'warn' : 'good'}><strong>{aiMessage}</strong></p>}
 
               <div className="notes">
                 <strong>Notes / Warnings</strong>
