@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CitationBuilder</title>
+  <meta name="description" content="Marine Corps award Summary of Action and citation drafting aid." />
+  <style>
+    :root {
+      --navy: #0f253f;
+      --navy-2: #16395f;
+      --gold: #c8a24a;
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d7dde5;
+      --danger: #9f1239;
+      --warn: #92400e;
+      --success: #166534;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    header {
+      background: linear-gradient(135deg, var(--navy), var(--navy-2));
+      color: white;
+      padding: 28px 22px;
+      border-bottom: 4px solid var(--gold);
+    }
+
+    header h1 {
+      margin: 0 0 6px;
+      font-size: clamp(28px, 5vw, 44px);
+      letter-spacing: 0.5px;
+    }
+
+    header p {
+      margin: 0;
+      max-width: 900px;
+      color: #dbeafe;
+      line-height: 1.45;
+    }
+
+    .container {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 22px;
+    }
+
+    .disclaimer {
+      background: #fffbeb;
+      border: 1px solid #f5d76e;
+      border-left: 6px solid var(--gold);
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 10px 24px rgba(15, 37, 63, 0.08);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 16px 18px;
+      background: #eef3f8;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-header h2 {
+      margin: 0;
+      color: var(--navy);
+      font-size: 20px;
+    }
+
+    .card-body { padding: 18px; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    label {
+      display: block;
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: #334155;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 11px 12px;
+      font-size: 14px;
+      color: var(--text);
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 190px;
+      resize: vertical;
+      line-height: 1.45;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: 3px solid rgba(37, 99, 235, 0.18);
+      border-color: #2563eb;
+    }
+
+    .full { grid-column: 1 / -1; }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 11px 16px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--navy);
+      color: #fff;
+      transition: transform 0.08s ease, opacity 0.2s ease;
+    }
+
+    button:hover { opacity: 0.92; }
+    button:active { transform: translateY(1px); }
+    button.secondary { background: #475569; }
+    button.gold { background: #9a741f; }
+    button.danger { background: #991b1b; }
+
+    .output-box {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      min-height: 160px;
+      background: #fcfdff;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .editable {
+      width: 100%;
+      min-height: 210px;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.55;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin: 18px 0 8px;
+    }
+
+    .section-title h3 {
+      margin: 0;
+      color: var(--navy);
+      font-size: 16px;
+    }
+
+    .counter {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .notes {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+    }
+
+    .notes ul { margin: 8px 0 0 20px; padding: 0; }
+    .notes li { margin: 5px 0; }
+    .warn { color: var(--warn); }
+    .bad { color: var(--danger); }
+    .good { color: var(--success); }
+
+    .small-help {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    footer {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 18px;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .container { padding: 14px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .button-row button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CitationBuilder</h1>
+    <p>A Marine Corps award drafting aid for turning rough achievements into a Summary of Action and proposed citation.</p>
+  </header>
+
+  <main class="container">
+    <div class="disclaimer">
+      <strong>Drafting aid only:</strong> Verify formatting, opening/closing lines, character limits, and routing requirements with current command guidance, iAPS, SECNAV M-1650.1, and SECNAV M-5216.5.
+    </div>
+
+    <div id="root"></div>
+  </main>
+
+  <footer>
+    CitationBuilder is not an official Department of Defense, Department of the Navy, or Marine Corps product.
+  </footer>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    const awardLabels = {
+      NAM: 'Navy and Marine Corps Achievement Medal',
+      NAVCOM: 'Navy and Marine Corps Commendation Medal',
+      MSM: 'Meritorious Service Medal',
+      LOM: 'Legion of Merit',
+      LOA: 'Letter of Appreciation',
+      COC: 'Certificate of Commendation',
+      MM: 'Meritorious Mast'
+    };
+
+    const ranks = ['PVT', 'PFC', 'LCPL', 'CPL', 'SGT', 'SSGT', 'GYSGT', '1STSGT', 'MSGT', 'MGYSGT', 'SGTMAJ', 'WO', 'CWO2', 'CWO3', 'CWO4', 'CWO5', '2NDLT', '1STLT', 'CAPT', 'MAJ', 'LTCOL', 'COL'];
+
+    const openingPhrases = {
+      NAM: 'PROFESSIONAL ACHIEVEMENT IN THE SUPERIOR PERFORMANCE OF {POSS} DUTIES WHILE SERVING AS',
+      NAVCOM: 'FOR MERITORIOUS SERVICE WHILE SERVING AS',
+      MSM: 'For outstanding meritorious service while serving as',
+      LOM: 'For exceptionally meritorious conduct in the performance of outstanding services while serving as'
+    };
+
+    const closingPhraseUpper = 'REFLECTED CREDIT UPON {OBJ} AND WERE IN KEEPING WITH THE HIGHEST TRADITIONS OF THE MARINE CORPS AND THE UNITED STATES NAVAL SERVICE.';
+    const closingPhraseNormal = 'reflected credit upon {OBJ} and were in keeping with the highest traditions of the Marine Corps and the United States Naval Service.';
+
+    const initialForm = {
+      rank: 'SGT',
+      firstName: '',
+      lastName: '',
+      billet: '',
+      unit: '',
+      command: '',
+      startDate: '',
+      endDate: '',
+      pronouns: 'he/him',
+      award: 'NAM',
+      achievements: ''
+    };
+
+    function pronounSet(value) {
+      if (value === 'she/her') return { subj: 'she', obj: 'her', poss: 'her', reflexive: 'herself', capSubj: 'She', capObj: 'Her', capPoss: 'Her' };
+      if (value === 'they/them') return { subj: 'they', obj: 'them', poss: 'their', reflexive: 'themselves', capSubj: 'They', capObj: 'Them', capPoss: 'Their' };
+      return { subj: 'he', obj: 'him', poss: 'his', reflexive: 'himself', capSubj: 'He', capObj: 'Him', capPoss: 'His' };
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return '[DATE]';
+      const date = new Date(dateString + 'T12:00:00');
+      return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+    }
+
+    function cleanAchievementLines(text) {
+      return text
+        .split('\n')
+        .map(line => line.replace(/^[-•*\d.)\s]+/, '').trim())
+        .filter(Boolean);
+    }
+
+    function sentenceCase(text) {
+      if (!text) return '';
+      const trimmed = text.trim();
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).replace(/\s+/g, ' ');
+    }
+
+    function ensurePeriod(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return trimmed;
+      return /[.!?]$/.test(trimmed) ? trimmed : trimmed + '.';
+    }
+
+    function fullName(form) {
+      return `${form.rank} ${form.firstName} ${form.lastName}`.replace(/\s+/g, ' ').trim();
+    }
+
+    function buildSOA(form, p, lines) {
+      const name = fullName(form) || '[RANK NAME]';
+      const awardName = awardLabels[form.award] || form.award;
+      const start = formatDate(form.startDate);
+      const end = formatDate(form.endDate);
+      const billet = form.billet || '[BILLET]';
+      const unit = form.unit || '[UNIT]';
+      const command = form.command || '[COMMAND]';
+
+      const intro = `${name} served as ${billet}, ${unit}, ${command}, from ${start} to ${end}. During this period, ${p.subj} demonstrated exceptional professionalism, sound judgment, and devotion to duty while making a measurable impact on the command mission.`;
+
+      const body = lines.length
+        ? lines.map((line, idx) => `${idx + 1}. ${ensurePeriod(sentenceCase(line))}`).join('\n')
+        : '1. [Enter specific action, measurable impact, and result.]';
+
+      const finalLine = `${p.capPoss} superior performance and unwavering dedication to duty make ${p.obj} highly deserving of the ${awardName}.`;
+
+      return `${intro}\n\n${body}\n\n${finalLine}`;
+    }
+
+    function summarizeForCitation(lines, p) {
+      if (!lines.length) {
+        return `${p.capSubj} consistently demonstrated professionalism, initiative, and devotion to duty while supporting mission accomplishment.`;
+      }
+
+      const selected = lines.slice(0, 3).map(line => ensurePeriod(sentenceCase(line)).replace(/\.$/, ''));
+
+      if (selected.length === 1) {
+        return `${p.capSubj} ${selected[0].charAt(0).toLowerCase() + selected[0].slice(1)}.`;
+      }
+
+      return `${p.capSubj} ${selected.join('; ').charAt(0).toLowerCase() + selected.join('; ').slice(1)}.`;
+    }
+
+    function buildCitation(form, p, lines) {
+      const award = form.award;
+      const start = formatDate(form.startDate);
+      const end = formatDate(form.endDate);
+      const billet = form.billet || '[BILLET]';
+      const unit = form.unit || '[UNIT]';
+      const command = form.command || '[COMMAND]';
+      const name = fullName(form) || '[RANK NAME]';
+
+      if (['LOA', 'COC', 'MM'].includes(award)) {
+        return `${name} is recognized for outstanding performance while serving as ${billet}, ${unit}, ${command}, from ${start} to ${end}. ${summarizeForCitation(lines, p)} ${p.capPoss} professionalism, initiative, and devotion to duty reflected great credit upon ${p.obj} and the command.`;
+      }
+
+      let opening = openingPhrases[award]
+        .replace('{POSS}', p.poss)
+        .replace('{OBJ}', p.obj);
+
+      let close = (award === 'NAM' || award === 'NAVCOM')
+        ? closingPhraseUpper.replace('{OBJ}', p.obj)
+        : closingPhraseNormal.replace('{OBJ}', p.obj);
+
+      let citation = `${opening} ${billet}, ${unit}, ${command}, FROM ${start} TO ${end}. ${summarizeForCitation(lines, p)} ${p.capPoss} professionalism, initiative, and devotion to duty ${close}`;
+
+      if (award === 'NAM' || award === 'NAVCOM') {
+        citation = citation.toUpperCase();
+      }
+
+      return citation.replace(/\s+/g, ' ').trim();
+    }
+
+    function validate(form, citation, lines) {
+      const notes = [];
+      const required = [
+        ['First name', form.firstName],
+        ['Last name', form.lastName],
+        ['Billet', form.billet],
+        ['Unit', form.unit],
+        ['Command', form.command],
+        ['Start date', form.startDate],
+        ['End date', form.endDate],
+        ['Achievements', form.achievements]
+      ];
+
+      required.forEach(([label, value]) => {
+        if (!value || !String(value).trim()) notes.push({ type: 'bad', text: `Missing required field: ${label}.` });
+      });
+
+      if (lines.length < 2) notes.push({ type: 'warn', text: 'Input is thin. Add at least 2–3 specific achievements with measurable impact.' });
+      if (form.achievements.length > 0 && form.achievements.length < 120) notes.push({ type: 'warn', text: 'Achievements may be too short to support a strong SOA and citation.' });
+
+      if (['MSM', 'LOM'].includes(form.award) && form.achievements.length < 500) {
+        notes.push({ type: 'warn', text: 'Selected award may require broader or more sustained impact than the current input shows.' });
+      }
+
+      if (['NAM', 'NAVCOM'].includes(form.award) && citation !== citation.toUpperCase()) {
+        notes.push({ type: 'bad', text: 'Citation must be ALL CAPS for NAM and Navy Comm.' });
+      }
+
+      if (['NAM', 'NAVCOM', 'MSM', 'LOM'].includes(form.award)) {
+        const normalized = citation.toUpperCase();
+        const expected = openingPhrases[form.award]
+          .replace('{POSS}', pronounSet(form.pronouns).poss)
+          .toUpperCase();
+        if (!normalized.includes(expected)) notes.push({ type: 'bad', text: 'Citation does not contain the required opening phrase.' });
+        if (!normalized.includes('HIGHEST TRADITIONS OF THE MARINE CORPS AND THE UNITED STATES NAVAL SERVICE')) notes.push({ type: 'bad', text: 'Citation does not contain the required closing phrase.' });
+      }
+
+      if (citation.includes('\n')) notes.push({ type: 'bad', text: 'Citation must be one paragraph.' });
+
+      if (!citation.trim()) notes.push({ type: 'bad', text: 'Citation is empty.' });
+
+      if (!notes.some(n => n.type === 'bad' || n.type === 'warn')) {
+        notes.push({ type: 'good', text: 'Basic validation passed. Review manually before routing.' });
+      }
+
+      return notes;
+    }
+
+    function downloadText(filename, content) {
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function App() {
+      const [form, setForm] = useState(initialForm);
+      const [soa, setSoa] = useState('');
+      const [citation, setCitation] = useState('');
+      const [notes, setNotes] = useState([]);
+      const [copied, setCopied] = useState('');
+
+      function update(field, value) {
+        setForm(prev => ({ ...prev, [field]: value }));
+      }
+
+      function generate() {
+        const p = pronounSet(form.pronouns);
+        const lines = cleanAchievementLines(form.achievements);
+        const nextSoa = buildSOA(form, p, lines);
+        const nextCitation = buildCitation(form, p, lines);
+        setSoa(nextSoa);
+        setCitation(nextCitation);
+        setNotes(validate(form, nextCitation, lines));
+        setCopied('');
+      }
+
+      function clearForm() {
+        setForm(initialForm);
+        setSoa('');
+        setCitation('');
+        setNotes([]);
+        setCopied('');
+      }
+
+      async function copyText(label, text) {
+        if (!text.trim()) return;
+        await navigator.clipboard.writeText(text);
+        setCopied(`${label} copied.`);
+        setTimeout(() => setCopied(''), 1800);
+      }
+
+      function exportTxt() {
+        const content = `CITATIONBUILDER DRAFT\n\nSUMMARY OF ACTION:\n${soa || '[Not generated]'}\n\nPROPOSED CITATION:\n${citation || '[Not generated]'}\n\nNOTES / WARNINGS:\n${notes.map(n => '- ' + n.text).join('\n') || '- None'}`;
+        downloadText('CitationBuilder-Draft.txt', content);
+      }
+
+      return (
+        <div className="grid">
+          <section className="card">
+            <div className="card-header"><h2>Input</h2></div>
+            <div className="card-body">
+              <div className="form-grid">
+                <div>
+                  <label>Rank</label>
+                  <select value={form.rank} onChange={e => update('rank', e.target.value)}>
+                    {ranks.map(rank => <option key={rank} value={rank}>{rank}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label>Award Type</label>
+                  <select value={form.award} onChange={e => update('award', e.target.value)}>
+                    {Object.entries(awardLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label>First Name</label>
+                  <input value={form.firstName} onChange={e => update('firstName', e.target.value)} placeholder="John" />
+                </div>
+                <div>
+                  <label>Last Name</label>
+                  <input value={form.lastName} onChange={e => update('lastName', e.target.value)} placeholder="Marine" />
+                </div>
+                <div className="full">
+                  <label>Billet Title</label>
+                  <input value={form.billet} onChange={e => update('billet', e.target.value)} placeholder="Platoon Sergeant" />
+                </div>
+                <div>
+                  <label>Unit</label>
+                  <input value={form.unit} onChange={e => update('unit', e.target.value)} placeholder="Company A" />
+                </div>
+                <div>
+                  <label>Command</label>
+                  <input value={form.command} onChange={e => update('command', e.target.value)} placeholder="Marine Barracks Washington" />
+                </div>
+                <div>
+                  <label>Start Date</label>
+                  <input type="date" value={form.startDate} onChange={e => update('startDate', e.target.value)} />
+                </div>
+                <div>
+                  <label>End Date</label>
+                  <input type="date" value={form.endDate} onChange={e => update('endDate', e.target.value)} />
+                </div>
+                <div className="full">
+                  <label>Pronouns</label>
+                  <select value={form.pronouns} onChange={e => update('pronouns', e.target.value)}>
+                    <option value="he/him">he/him</option>
+                    <option value="she/her">she/her</option>
+                    <option value="they/them">they/them</option>
+                  </select>
+                </div>
+                <div className="full">
+                  <label>Achievements</label>
+                  <textarea value={form.achievements} onChange={e => update('achievements', e.target.value)} placeholder={'Paste rough bullets here. Example:\n- Led 12 Marines during 46 ceremonial commitments, improving readiness and reducing missed timelines.\n- Trained 4 junior Marines, resulting in 100% qualification on assigned duties.'}></textarea>
+                  <div className="small-help">Best results: include numbers, mission impact, leadership scope, and specific outcomes.</div>
+                </div>
+              </div>
+
+              <div className="button-row">
+                <button onClick={generate}>Generate Draft</button>
+                <button className="secondary" onClick={clearForm}>Clear Form</button>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-header"><h2>Output</h2></div>
+            <div className="card-body">
+              <div className="section-title">
+                <h3>Summary of Action</h3>
+                <span className="counter">{soa.length} characters</span>
+              </div>
+              <textarea className="editable" value={soa} onChange={e => setSoa(e.target.value)} placeholder="Generated Summary of Action will appear here."></textarea>
+
+              <div className="button-row">
+                <button className="secondary" onClick={() => copyText('SOA', soa)}>Copy SOA</button>
+              </div>
+
+              <div className="section-title">
+                <h3>Proposed Citation</h3>
+                <span className="counter">{citation.length} characters</span>
+              </div>
+              <textarea className="editable" value={citation} onChange={e => setCitation(e.target.value)} placeholder="Generated citation will appear here."></textarea>
+
+              <div className="button-row">
+                <button className="secondary" onClick={() => copyText('Citation', citation)}>Copy Citation</button>
+                <button className="gold" onClick={exportTxt}>Export .txt</button>
+              </div>
+
+              {copied && <p className="good"><strong>{copied}</strong></p>}
+
+              <div className="notes">
+                <strong>Notes / Warnings</strong>
+                {notes.length ? (
+                  <ul>
+                    {notes.map((note, idx) => <li key={idx} className={note.type}>{note.text}</li>)}
+                  </ul>
+                ) : (
+                  <p className="small-help">Generate a draft to see validation notes.</p>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
