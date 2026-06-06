@@ -1365,6 +1365,7 @@ export default function Index() {
   const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>(loadSavedDrafts);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [showCatPopup, setShowCatPopup] = useState<boolean>(false);
+  const [catEasterEggDismissed, setCatEasterEggDismissed] = useState<boolean>(false);
   const hasRestored = useRef(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -1447,6 +1448,8 @@ export default function Index() {
     setClassifiedAchievements([]);
     setQualityScores(null);
     setActiveDraftId(null);
+    setShowCatPopup(false);
+    setCatEasterEggDismissed(false);
     setShowStartupDialog(false);
   }
 
@@ -1465,6 +1468,8 @@ export default function Index() {
     setQualityScores(null);
     setAiBanner({ show: false, over: false, message: "" });
     setActiveDraftId(null);
+    setShowCatPopup(false);
+    setCatEasterEggDismissed(false);
     toast.success("New award started");
   }
 
@@ -1509,6 +1514,8 @@ export default function Index() {
     setClassifiedAchievements(classifyAll(achievementLines(draft.form)));
     setAiBanner({ show: false, over: false, message: "" });
     setActiveDraftId(id);
+    setShowCatPopup(false);
+    setCatEasterEggDismissed(false);
     toast.success("Draft opened");
   }
 
@@ -1551,11 +1558,15 @@ export default function Index() {
   }, [form, soa, citation]);
 
   useEffect(() => {
-    if (!/\b(cats?|kittens?|litter\s*box|litterbox|fostered cats|fostered kittens)\b/i.test(form.achievements)) return;
-    setShowCatPopup(true);
-    const timer = setTimeout(() => setShowCatPopup(false), 4200);
+    if (catEasterEggDismissed) return;
+    const timer = setTimeout(() => {
+      const trigger = /(?:^|[^A-Za-z])(?:fostered\s+cats|fostered\s+kittens|litter\s+box|litterbox|cats|cat|kittens|kitten)(?=$|[^A-Za-z])/i;
+      if (trigger.test(form.achievements)) {
+        setShowCatPopup(true);
+      }
+    }, 900);
     return () => clearTimeout(timer);
-  }, [form.achievements]);
+  }, [form.achievements, catEasterEggDismissed]);
 
   // Keyboard shortcut
   useEffect(() => {
@@ -2592,7 +2603,10 @@ ${bodyContent}
                 {showCatPopup && (
                   <div className="absolute right-[10px] top-[10px] z-10 rounded-[10px] border border-[#dcd6c8] bg-white px-[10px] py-[7px] text-[12px] font-semibold text-[#3a414b] shadow-[0_8px_22px_rgba(17,22,29,.14)]">
                     <button
-                      onClick={() => setShowCatPopup(false)}
+                      onClick={() => {
+                        setShowCatPopup(false);
+                        setCatEasterEggDismissed(true);
+                      }}
                       className="ml-[8px] float-right text-[#6b6f76]"
                       aria-label="Dismiss"
                     >
