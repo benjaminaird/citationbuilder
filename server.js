@@ -25,6 +25,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+const ANTHROPIC_FALLBACK_MODEL =
+  process.env.ANTHROPIC_FALLBACK_MODEL || "claude-3-5-haiku-20241022";
 
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "dist")));
@@ -254,7 +256,7 @@ app.post("/api/improve", async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45000);
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const makeAnthropicRequest = (model) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -262,7 +264,7 @@ app.post("/api/improve", async (req, res) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
+        model,
         max_tokens: 2000,
         system,
         messages: [{ role: "user", content: user }],
@@ -270,10 +272,29 @@ app.post("/api/improve", async (req, res) => {
       signal: controller.signal,
     });
 
+    let usedModel = ANTHROPIC_MODEL;
+    let response = await makeAnthropicRequest(usedModel);
+    let detail = "";
+
+    if (!response.ok) {
+      detail = await response.text().catch(() => "");
+      const modelUnavailable =
+        response.status === 404 && /model/i.test(detail) && ANTHROPIC_FALLBACK_MODEL !== usedModel;
+
+      if (modelUnavailable) {
+        console.warn(
+          `Anthropic model ${usedModel} unavailable; retrying with ${ANTHROPIC_FALLBACK_MODEL}`,
+        );
+        usedModel = ANTHROPIC_FALLBACK_MODEL;
+        response = await makeAnthropicRequest(usedModel);
+        detail = "";
+      }
+    }
+
     clearTimeout(timeout);
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
+      if (!detail) detail = await response.text().catch(() => "");
       console.error("Anthropic API error:", response.status, detail.slice(0, 500));
 
       let providerMessage = "";
@@ -286,7 +307,7 @@ app.post("/api/improve", async (req, res) => {
 
       const cleanProviderMessage = String(providerMessage).replace(/\s+/g, " ").trim();
       const modelHint = response.status === 404 || /model/i.test(cleanProviderMessage)
-        ? ` Check ANTHROPIC_MODEL; this deploy is using ${ANTHROPIC_MODEL}.`
+        ? ` Check ANTHROPIC_MODEL; this deploy tried ${usedModel}.`
         : "";
       const authHint = response.status === 401
         ? " Check that ANTHROPIC_API_KEY is set correctly in Render."
