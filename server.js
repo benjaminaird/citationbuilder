@@ -24,9 +24,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 const ANTHROPIC_FALLBACK_MODEL =
-  process.env.ANTHROPIC_FALLBACK_MODEL || "claude-3-5-haiku-20241022";
+  process.env.ANTHROPIC_FALLBACK_MODEL || "claude-haiku-4-5-20251001";
 
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "dist")));

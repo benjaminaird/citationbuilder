@@ -18,8 +18,8 @@ Copy `.env.example` to `.env` for local development and add your real values:
 
 ```bash
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-ANTHROPIC_FALLBACK_MODEL=claude-3-5-haiku-20241022
+ANTHROPIC_MODEL=claude-sonnet-4-6
+ANTHROPIC_FALLBACK_MODEL=claude-haiku-4-5-20251001
 ```
 
 Do not commit `.env`. It contains secrets and is ignored by Git.
