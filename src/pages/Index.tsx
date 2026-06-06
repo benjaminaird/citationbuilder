@@ -67,6 +67,7 @@ interface AwardMatchResult {
   severity: "none" | "possible" | "severe";
   title: string;
   detail: string;
+  recommendedAward: AwardKey;
   recommendations: string[];
 }
 
@@ -160,6 +161,15 @@ const CATEGORY_COLORS: Record<AchievementCategory, string> = {
 };
 
 const UNIT_CANON = "Marine Barracks, Washington, D.C.,";
+const UNIT_PRESETS = [
+  "Marine Barracks, Washington, D.C.",
+  "A Company",
+  "B Company",
+  "Headquarters and Service Company",
+  "Guard Company",
+  '"The Commandant\'s Own", U.S. Marine Drum & Bugle Corps',
+  '"The President\'s Own", U.S. Marine Band',
+] as const;
 const STORAGE_KEY = "citationbuilder.form";
 const SAVED_DRAFTS_KEY = "citationbuilder.savedDrafts";
 
@@ -254,6 +264,18 @@ function scopeLevel(text: string): number {
   return 1;
 }
 
+function recommendedAwardFromSupport(support: number): AwardKey {
+  if (support <= 1) return "NAM";
+  if (support === 2) return "NMC";
+  if (support === 3) return "MSM";
+  return "LOM";
+}
+
+function awardShortLabel(award: AwardKey): string {
+  if (award === "NMC") return "Navy and Marine Corps Commendation Medal";
+  return AWARDS[award].label;
+}
+
 function analyzeWeakInput(form: FormState): WeakInputIssue[] {
   const text = form.achievements;
   if (!text.trim()) {
@@ -297,6 +319,93 @@ function analyzeWeakInput(form: FormState): WeakInputIssue[] {
   return issues;
 }
 
+function analyzeRealityIssues(form: FormState): CheckItem[] {
+  const text = form.achievements;
+  if (!text.trim()) return [];
+  const checks: CheckItem[] = [];
+  const personalRoutine = /\b(fed (my )?cat|cleaned (my )?litter box|walked (my )?dog|washed (my )?car|made (my )?bed|did (my )?laundry|read one book|read a book)\b/i;
+  const trivial = /\b(showed up|was on time|did my job|completed daily tasks|answered emails|attended formation)\b/i;
+  const hugeClaim = /\b(saved|led|trained|managed|impacted|supported)\s+(?:over\s+|more than\s+)?(?:10,000|10000|[5-9]\d{3,})\s+(marines|sailors|personnel|people|families)\b/i;
+  const noContext = hugeClaim.test(text) && !/(command-wide|service-wide|installation|multi-year|enterprise|across|throughout|program|initiative)/i.test(text);
+
+  if (personalRoutine.test(text) || trivial.test(text)) {
+    checks.push({
+      status: "warn",
+      title: "Reality Check",
+      detail: "Input appears to describe routine personal responsibilities rather than award-worthy accomplishments.",
+    });
+  }
+  if (noContext) {
+    checks.push({
+      status: "warn",
+      title: "Reality Check",
+      detail: "Impact claims appear unusually large and may require supporting context.",
+    });
+  }
+  return checks;
+}
+
+function analyzeOVSMIssues(form: FormState): CheckItem[] {
+  if (form.award !== "OVSM") return [];
+  const text = `${form.achievements} ${form.dateFrom} ${form.dateTo}`;
+  const checks: CheckItem[] = [];
+  const hasHours = /\b\d+\s*(hours?|hrs?)\b/i.test(text);
+  const hasDuration = /\b(months?|years?|weekly|monthly|sustained|from\b.+\bto\b)\b/i.test(text) || Boolean(form.dateFrom && form.dateTo);
+  const hasCommunity = /\b(community|families|youth|veterans|students|residents|beneficiaries|civilians|charity|nonprofit|organization)\b/i.test(text);
+  const hasBeneficiaries = /\b\d+\s*(families|youth|students|veterans|residents|people|beneficiaries|children|members)\b/i.test(text);
+  const hasVolunteerLeadership = /\b(led|organized|coordinated|supervised|managed|trained|mentored|chaired)\b/i.test(text);
+  const hasSustainability = /\b(sustained|recurring|weekly|monthly|program|established|continued|ongoing|long-term)\b/i.test(text);
+
+  checks.push(hasHours
+    ? { status: "ok", title: "OVSM volunteer hours", detail: "Volunteer hours are documented." }
+    : { status: "warn", title: "OVSM volunteer hours", detail: "Add total volunteer hours or a clear estimate." });
+  checks.push(hasDuration
+    ? { status: "ok", title: "OVSM duration", detail: "Duration of service is documented." }
+    : { status: "warn", title: "OVSM duration", detail: "Describe sustained service over time, not a one-time event." });
+  checks.push(hasCommunity
+    ? { status: "ok", title: "OVSM community impact", detail: "Community impact is described." }
+    : { status: "warn", title: "OVSM community impact", detail: "Volunteer effort is documented but community impact is not clearly described." });
+  checks.push(hasBeneficiaries
+    ? { status: "ok", title: "OVSM beneficiaries", detail: "Beneficiaries served are quantified." }
+    : { status: "warn", title: "OVSM beneficiaries", detail: "Add who benefited and how many people or organizations were served." });
+  checks.push(hasVolunteerLeadership
+    ? { status: "ok", title: "OVSM leadership", detail: "Volunteer leadership is shown." }
+    : { status: "warn", title: "OVSM leadership", detail: "If applicable, describe leadership within the volunteer organization or event." });
+  checks.push(hasSustainability
+    ? { status: "ok", title: "OVSM sustainability", detail: "Sustained or recurring effort is shown." }
+    : { status: "warn", title: "OVSM sustainability", detail: "Explain whether the effort was recurring, sustained, or created lasting benefit." });
+  return checks;
+}
+
+function accomplishmentPriorityScore(line: string, form: FormState): number {
+  const text = `${line} ${form.billet}`;
+  let score = 0;
+  score += countMatches(text, QUANTIFIABLE) * 18;
+  score += countMatches(text, STRONG_VERBS) * 12;
+  score += countMatches(text, LEADERSHIP_TERMS) * 12;
+  score += countMatches(text, RESULT_TERMS) * 14;
+  score += scopeLevel(text) * 10;
+  if (/(mission|readiness|operational|ceremonial|inspection|deployment|training|command)/i.test(text)) score += 12;
+  if (/(read one book|fed my cat|litter box|showed up|did my job)/i.test(text)) score -= 40;
+  if (form.award === "LOM" || form.award === "MSM") {
+    if (/(command-wide|institutional|sustained|program|enterprise|organization|led|supervised|managed)/i.test(text)) score += 15;
+  }
+  if (form.award === "NAM" || form.award === "NMC") {
+    if (/(section|team|detail|event|readiness|zero discrepancies|personnel|marines)/i.test(text)) score += 10;
+  }
+  return score;
+}
+
+function prioritizedAchievementLines(form: FormState, forCitation: boolean): string[] {
+  const lines = achievementLines(form);
+  if (!forCitation) return lines;
+  const ranked = lines
+    .map((line, index) => ({ line, index, score: accomplishmentPriorityScore(line, form) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const limit = AWARDS[form.award].maxChars ? 3 : 5;
+  return ranked.slice(0, Math.max(1, Math.min(limit, ranked.length))).map((item) => item.line);
+}
+
 function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
   const text = `${form.achievements} ${citation}`.trim();
   const lines = achievementLines(form);
@@ -306,6 +415,7 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
       severity: "none",
       title: "Award level not yet assessed",
       detail: "Add accomplishments to assess award level.",
+      recommendedAward: form.award,
       recommendations: [],
     };
   }
@@ -319,6 +429,7 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
   const support = Math.min(4, Math.round((rank + billet + scope + Math.min(4, lines.length) + quant + leadership + results + language) / 7));
   const selected = awardLevel(form.award);
   const diff = selected - support;
+  const recommendedAward = recommendedAwardFromSupport(support);
 
   let severity: AwardMatchResult["severity"] = "none";
   let title = "Award level appears supportable";
@@ -327,15 +438,16 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
 
   if (form.award === "LOM" && rank <= 2 && support <= 2) {
     severity = "severe";
-    title = "High Award Mismatch Warning";
+    title = "Award Mismatch Warning";
     detail = "The selected award may not be appropriate for the rank, billet, and scope entered. Review award level before submission.";
     recommendations.push("This does not currently support an LOM.");
-    recommendations.push("This reads more like a NAM or Navy Comm unless major command-level impact is added.");
+    recommendations.push(`Recommended award level: ${awardShortLabel(recommendedAward)}.`);
   } else if (diff >= 2) {
     severity = "severe";
-    title = "High Award Mismatch Warning";
+    title = "Award Mismatch Warning";
     detail = "The selected award may not be appropriate for the rank, billet, and scope entered. Review award level before submission.";
-    recommendations.push(`This does not currently support an ${form.award}.`);
+    recommendations.push(`This package does not currently support ${AWARDS[form.award].label}.`);
+    recommendations.push(`Recommended award level: ${awardShortLabel(recommendedAward)}.`);
     recommendations.push("Add sustained leadership, measurable command-level impact, and broader organizational results.");
   } else if (diff === 1) {
     severity = "possible";
@@ -343,7 +455,7 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
     detail = "The selected award may be high for the current rank, billet, and accomplishment scope.";
     recommendations.push(form.award === "NMC"
       ? "This may support a Navy Comm if stronger command-level impact is added."
-      : `This reads more like a ${support <= 1 ? "NAM" : "Navy Comm"}.`);
+      : `This package currently supports ${awardShortLabel(recommendedAward)}.`);
   }
 
   if (selected <= 1 && rank >= 4 && (scope >= 3 || leadership >= 2 || quant >= 2)) {
@@ -354,13 +466,13 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
   }
 
   if (!recommendations.length) {
-    if (selected === 1) recommendations.push("This reads like a NAM when impact remains local and individual.");
-    if (selected === 2) recommendations.push("This may support a Navy Comm when command-level impact is clear.");
+    if (selected === 1) recommendations.push("This package currently supports a NAM when impact remains local and individual.");
+    if (selected === 2) recommendations.push("This package may support a Navy and Marine Corps Commendation Medal when command-level impact is clear.");
     if (selected >= 3) recommendations.push("Ensure the write-up shows sustained leadership, organizational impact, and measurable results.");
   }
 
   const score = Math.max(15, Math.min(100, 100 - Math.abs(diff) * 25 - (severity === "severe" ? 20 : severity === "possible" ? 8 : 0)));
-  return { score, severity, title, detail, recommendations: Array.from(new Set(recommendations)).slice(0, 3) };
+  return { score, severity, title, detail, recommendedAward, recommendations: Array.from(new Set(recommendations)).slice(0, 3) };
 }
 
 function scoreQuality(citation: string, form: FormState): QualityScores {
@@ -501,7 +613,7 @@ function dateOrderError(form: FormState): string | null {
   const from = parseServiceDate(form.dateFrom);
   const to = parseServiceDate(form.dateTo);
   if (!from || !to) return null;
-  return to.getTime() < from.getTime() ? "End date cannot be before start date." : null;
+  return to.getTime() < from.getTime() ? "End date must be after start date." : null;
 }
 
 function applyCase(text: string, mode: "upper" | "sentence"): string {
@@ -512,24 +624,34 @@ function rankLast(form: FormState): string {
   return [form.rank, form.lastName].filter(Boolean).join(" ").trim() || "[Rank Lastname]";
 }
 
+function displayUnit(unit: string): string {
+  return normalizeWashingtonDC(unit || UNIT_PRESETS[0]).replace(/,\s*$/g, "");
+}
+
+function unitInSentence(unit: string): string {
+  const cleanUnit = displayUnit(unit);
+  return cleanUnit === UNIT_PRESETS[0] ? UNIT_CANON : `${cleanUnit},`;
+}
+
 function buildOpening(form: FormState): string {
   const p = PRONOUNS[form.pronoun];
   const billet = form.billet || "[Billet]";
   const from = form.dateFrom || "[Month Year]";
   const to = form.dateTo || "[Month Year]";
   const rl = rankLast(form);
+  const unit = unitInSentence(form.unit);
 
   switch (form.award) {
     case "NAM":
-      return `Professional achievement in the superior performance of ${p.poss} duties while serving as ${billet}, ${UNIT_CANON} from ${from} to ${to}.`;
+      return `Professional achievement in the superior performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "NMC":
-      return `Meritorious service while serving as ${billet}, ${UNIT_CANON} from ${from} to ${to}.`;
+      return `Meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "CERTCOM":
-      return `Superior performance of duty while serving as ${billet}, ${UNIT_CANON} from ${from} to ${to}. ${rl} performed ${p.poss} duties in an exemplary and highly professional manner.`;
+      return `Superior performance of duty while serving as ${billet}, ${unit} from ${from} to ${to}. ${rl} performed ${p.poss} duties in an exemplary and highly professional manner.`;
     case "MSM":
-      return `For outstanding meritorious service while serving as ${billet}, ${UNIT_CANON} from ${from} to ${to}.`;
+      return `For outstanding meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "LOM":
-      return `For exceptionally meritorious conduct in the performance of outstanding services while serving as ${billet}, ${UNIT_CANON} from ${from} to ${to}.`;
+      return `For exceptionally meritorious conduct in the performance of outstanding services while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     default:
       return "";
   }
@@ -547,8 +669,8 @@ function buildClosing(form: FormState): string {
 }
 
 // ---- Build citation body: synthesize accomplishments into impact-focused narrative ----
-function buildBody(form: FormState): string {
-  const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
+function buildBody(form: FormState, forCitation = false): string {
+  const lines = prioritizedAchievementLines(form, forCitation);
   if (!lines.length) {
     const p = PRONOUNS[form.pronoun];
     return `${rankLast(form)} consistently performed ${p.poss} demanding duties with exceptional skill, sound judgment, and unwavering commitment.`;
@@ -624,6 +746,7 @@ function buildSOA(form: FormState): string {
   const from = form.dateFrom || "[Month Year]";
   const to = form.dateTo || "[Month Year]";
   const awardLabel = AWARDS[form.award].label;
+  const unit = unitInSentence(form.unit);
 
   const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
   const classified = classifyAll(lines);
@@ -632,7 +755,7 @@ function buildSOA(form: FormState): string {
   const heShe = p.subj.charAt(0).toUpperCase() + p.subj.slice(1);
   const background = [
     `${name} is enthusiastically recommended for award of the ${awardLabel} ` +
-      `for ${p.poss} outstanding performance of duty while serving as ${billet}, ${UNIT_CANON} ` +
+      `for ${p.poss} outstanding performance of duty while serving as ${billet}, ${unit} ` +
       `from ${from} to ${to}.`,
     `Throughout ${p.poss} tour, ${rl} demonstrated exceptional leadership, technical expertise, ` +
       `and steadfast dedication, consistently surpassing the demanding standards expected of ` +
@@ -723,7 +846,7 @@ function buildLOA(form: FormState): string {
   const billet = form.billet || "[Billet]";
   const from = form.dateFrom || "[Date]";
   const to = form.dateTo || "[Date]";
-  const unit = form.unit || UNIT_CANON.replace(/,$/, "");
+  const unit = displayUnit(form.unit);
   const heShe = p.subj.charAt(0).toUpperCase() + p.subj.slice(1);
 
   const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -852,7 +975,7 @@ function buildLOA(form: FormState): string {
 
 function assembleCitation(form: FormState): string {
   const cfg = AWARDS[form.award];
-  let body = buildBody(form);
+  let body = buildBody(form, true);
   body = expandAbbr(body);
   let text = `${buildOpening(form)} ${body} ${buildClosing(form)}`;
   text = expandAbbr(text);
@@ -882,6 +1005,8 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   for (const issue of analyzeWeakInput(form)) {
     checks.push({ status: "warn", title: issue.title, detail: issue.detail });
   }
+  checks.push(...analyzeRealityIssues(form));
+  checks.push(...analyzeOVSMIssues(form));
 
   // OVSM uses LOA format — different validation
   if (cfg.isLOA) {
@@ -1169,6 +1294,7 @@ export default function Index() {
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [aiAvailable, setAiAvailable] = useState<boolean>(false);
   const [aiLoading, setAiLoading] = useState<boolean>(false);
+  const [aiEnhancement, setAiEnhancement] = useState<boolean>(true);
   const [aiNotes, setAiNotes] = useState<string[]>([]);
   const [spellMode, setSpellMode] = useState<boolean>(false);
   const [aiBanner, setAiBanner] = useState<{ show: boolean; over: boolean; message: string }>({ show: false, over: false, message: "" });
@@ -1188,6 +1314,7 @@ export default function Index() {
   const currentAwardMatch = awardMatchScore(form, citation || soa);
   const currentWeakInput = analyzeWeakInput(form);
   const hasHardValidationError = Boolean(dateErr);
+  const unitIsPreset = (UNIT_PRESETS as readonly string[]).includes(displayUnit(form.unit));
 
   // Show splash for 3.5s, then check for saved draft
   useEffect(() => {
@@ -1367,7 +1494,18 @@ export default function Index() {
     return () => document.removeEventListener("keydown", handler);
   }, [form]);
 
-  function handleGenerate() {
+  async function requestAIImprove(payload: Record<string, unknown>) {
+    const r = await fetch("/api/improve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "AI request failed");
+    return d;
+  }
+
+  async function handleGenerate() {
     if (dateErr) {
       setChecks(runChecks(citation, soa, form));
       toast.error(dateErr);
@@ -1382,9 +1520,25 @@ export default function Index() {
       toast.error("Add: " + missing.join(", "));
     }
 
+    setAiLoading(Boolean(aiEnhancement && aiAvailable));
+    const collectedNotes: string[] = [];
+
     // OVSM uses Letter of Authorization format, not SOA + Citation
     if (cfg.isLOA) {
-      const loa = buildLOA(form);
+      let loa = buildLOA(form);
+
+      if (aiEnhancement && aiAvailable) {
+        try {
+          const improved = await requestAIImprove({ mode: "loa", award: form.award, soa: loa });
+          loa = cleanup(expandAbbr(improved.loa || loa));
+          if (Array.isArray(improved.notes)) collectedNotes.push(...improved.notes.map((n: unknown) => String(n)));
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "AI request failed");
+        }
+      } else if (aiEnhancement && !aiAvailable) {
+        setAiBanner({ show: true, over: false, message: "AI unavailable. Using standard drafting mode." });
+        toast.info("AI unavailable. Using standard drafting mode.");
+      }
 
       // Classify achievements
       const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -1394,13 +1548,27 @@ export default function Index() {
       setCitation("");
       setChecks(runChecks("", loa, form));
       setQualityScores(null); // No citation quality score for LOA
-      setAiNotes([]);
-      setAiBanner({ show: false, over: false, message: "" });
-      toast.success("Letter of Authorization generated");
+      setAiNotes(collectedNotes.slice(0, 8));
+      if (!aiEnhancement || aiAvailable) setAiBanner({ show: false, over: false, message: "" });
+      setAiLoading(false);
+      toast.success(aiEnhancement && aiAvailable ? "Award package generated with AI" : "Award package generated");
       return;
     }
 
-    const newSoa = cleanup(buildSOA(form));
+    let newSoa = cleanup(buildSOA(form));
+    if (aiEnhancement && aiAvailable) {
+      try {
+        const improved = await requestAIImprove({ mode: "soa", award: form.award, soa: newSoa });
+        newSoa = cleanup(expandAbbr(improved.soa || newSoa));
+        if (Array.isArray(improved.notes)) collectedNotes.push(...improved.notes.map((n: unknown) => String(n)));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "AI request failed");
+      }
+    } else if (aiEnhancement && !aiAvailable) {
+      setAiBanner({ show: true, over: false, message: "AI unavailable. Using standard drafting mode." });
+      toast.info("AI unavailable. Using standard drafting mode.");
+    }
+
     let newCitation = assembleCitation(form);
 
     // Auto-expand citation if below target range (no AI needed)
@@ -1408,6 +1576,24 @@ export default function Index() {
       const expanded = expandCitationLocally(newCitation, cfg.target[0], cfg.maxChars, form);
       if (expanded.length > newCitation.length) {
         newCitation = cleanup(applyCase(expanded, cfg.casing));
+      }
+    }
+
+    if (aiEnhancement && aiAvailable && citation !== newCitation) {
+      try {
+        const expanded = await requestAIImprove({
+          mode: "expand",
+          award: form.award,
+          citation: newCitation,
+          opening: applyCase(buildOpening(form), cfg.casing),
+          closing: applyCase(buildClosing(form), cfg.casing),
+          charLimit: cfg.maxChars || 0,
+          targetLow: cfg.target?.[0] || 0,
+        });
+        newCitation = applyCase(cleanup(enforceWashington(expandAbbr(expanded.citation || newCitation))), cfg.casing);
+        if (Array.isArray(expanded.notes)) collectedNotes.push(...expanded.notes.map((n: unknown) => String(n)));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "AI request failed");
       }
     }
 
@@ -1421,9 +1607,10 @@ export default function Index() {
     setSoa(newSoa);
     setCitation(newCitation);
     setChecks(runChecks(newCitation, newSoa, form));
-    setAiNotes([]);
-    setAiBanner({ show: false, over: false, message: "" });
-    toast.success("Drafts generated");
+    setAiNotes(collectedNotes.slice(0, 8));
+    if (!aiEnhancement || aiAvailable) setAiBanner({ show: false, over: false, message: "" });
+    setAiLoading(false);
+    toast.success(aiEnhancement && aiAvailable ? "Award package generated with AI" : "Award package generated");
   }
 
   function handleClear() {
@@ -1908,11 +2095,6 @@ ${bodyContent}
             </p>
           </div>
           <div className="flex-1" />
-          <span className="inline-flex items-center gap-[5px] sm:gap-[7px] text-[10.5px] sm:text-[11.5px] lg:text-[12px] text-[#cfd5de] rounded-full px-[8px] sm:px-[10px] lg:px-[11px] py-[4px] sm:py-[5px] lg:py-[6px] border border-white/10 bg-white/[.06] shrink-0">
-            <span className={`w-[7px] h-[7px] sm:w-2 sm:h-2 rounded-full shrink-0 ${aiAvailable ? "bg-[#3fbf63] shadow-[0_0_0_3px_rgba(63,191,99,.2)]" : "bg-[#d3a23a] shadow-[0_0_0_3px_rgba(211,162,58,.2)]"}`} />
-            <span className="hidden sm:inline">{aiAvailable ? "AI refine: ready" : "AI refine: offline"}</span>
-            <span className="sm:hidden">{aiAvailable ? "AI on" : "AI off"}</span>
-          </span>
         </div>
       </header>
 
@@ -1964,7 +2146,7 @@ ${bodyContent}
 
       {/* Main layout — responsive: stacked on mobile, 3-col on desktop */}
       <nav className="lg:hidden sticky top-[58px] z-30 max-w-[1480px] mx-auto px-[14px] pt-[10px]">
-        <div className="flex gap-[6px] overflow-x-auto rounded-[10px] border border-[#dcd6c8] bg-white/95 p-[6px] shadow-[0_6px_18px_rgba(17,22,29,.08)]">
+        <div className="grid grid-cols-5 gap-[5px] rounded-[10px] border border-[#dcd6c8] bg-white/95 p-[6px] shadow-[0_6px_18px_rgba(17,22,29,.08)]">
           {[
             ["details", "Details"],
             ["accomplishments", "Accomplishments"],
@@ -1975,7 +2157,7 @@ ${bodyContent}
             <button
               key={id}
               onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              className="shrink-0 text-[12px] font-semibold px-[10px] py-[7px] rounded-[8px] bg-[#f6f3ea] text-[#3a414b] border border-transparent"
+              className="min-w-0 text-[11px] font-semibold px-[5px] py-[7px] rounded-[8px] bg-[#f6f3ea] text-[#3a414b] border border-transparent truncate"
             >
               {label}
             </button>
@@ -2130,14 +2312,26 @@ ${bodyContent}
               {/* Unit */}
               <div>
                 <label className="block text-[12px] font-semibold text-[#3a414b] mb-[5px]">Unit</label>
-                <input
-                  type="text"
-                  value={form.unit}
-                  onChange={(e) => updateForm({ unit: e.target.value })}
+                <select
+                  value={unitIsPreset ? displayUnit(form.unit) : "Custom Unit"}
+                  onChange={(e) => updateForm({ unit: e.target.value === "Custom Unit" ? "" : e.target.value })}
                   className="w-full text-[14px] text-[#1c222b] bg-[#fcfbf8] border border-[#dcd6c8] rounded-[9px] p-[9px_11px] focus:outline-none focus:border-[#a01722] focus:shadow-[0_0_0_3px_rgba(160,23,34,.12)] focus:bg-white transition-[border-color,box-shadow] duration-150"
                   style={{ fontFamily: "inherit" }}
-                />
-                <div className="text-[11px] text-[#6b6f76] mt-[4px]">Enforced format. Edit only if truly different.</div>
+                >
+                  {UNIT_PRESETS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  <option value="Custom Unit">Custom Unit</option>
+                </select>
+                {!unitIsPreset && (
+                  <input
+                    type="text"
+                    value={form.unit}
+                    onChange={(e) => updateForm({ unit: e.target.value })}
+                    placeholder="Enter custom unit"
+                    className="mt-[8px] w-full text-[14px] text-[#1c222b] bg-[#fcfbf8] border border-[#dcd6c8] rounded-[9px] p-[9px_11px] focus:outline-none focus:border-[#a01722] focus:shadow-[0_0_0_3px_rgba(160,23,34,.12)] focus:bg-white transition-[border-color,box-shadow] duration-150"
+                    style={{ fontFamily: "inherit" }}
+                  />
+                )}
+                <div className="text-[11px] text-[#6b6f76] mt-[4px]">Use an MBW preset or choose Custom Unit.</div>
               </div>
 
               {/* Dates */}
@@ -2315,18 +2509,31 @@ ${bodyContent}
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-[9px]">
+              <div className="flex flex-wrap items-center gap-[9px]">
+                <button
+                  type="button"
+                  onClick={() => setAiEnhancement((v) => !v)}
+                  className="cursor-pointer text-[13.5px] font-semibold px-[13px] py-[10px] rounded-[9px] inline-flex items-center gap-[8px] bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] transition-colors active:translate-y-px"
+                >
+                  <span
+                    className="w-[34px] h-[18px] rounded-full p-[2px] inline-flex"
+                    style={{ background: aiEnhancement ? "#2f7d44" : "#aeb6c2", justifyContent: aiEnhancement ? "flex-end" : "flex-start" }}
+                  >
+                    <span className="w-[14px] h-[14px] rounded-full bg-white" />
+                  </span>
+                  AI Enhancement {aiEnhancement ? "ON" : "OFF"}
+                </button>
                 <button
                   onClick={handleGenerate}
-                  disabled={hasHardValidationError}
+                  disabled={hasHardValidationError || aiLoading}
                   className="cursor-pointer text-[13.5px] font-semibold px-[15px] py-[10px] rounded-[9px] inline-flex items-center gap-2 text-white transition-transform duration-[.08s] active:translate-y-px"
                   style={{
-                    background: hasHardValidationError ? "#aeb6c2" : "linear-gradient(160deg, #a01722, #7c0f19)",
+                    background: hasHardValidationError || aiLoading ? "#aeb6c2" : "linear-gradient(160deg, #a01722, #7c0f19)",
                     boxShadow: "0 6px 16px rgba(160,23,34,.28)",
-                    cursor: hasHardValidationError ? "not-allowed" : "pointer",
+                    cursor: hasHardValidationError || aiLoading ? "not-allowed" : "pointer",
                   }}
                 >
-                  {cfg.isLOA ? "Generate Letter of Authorization" : "Generate SOA & Citation"}
+                  {aiLoading ? "Generating..." : "Generate Award Package"}
                 </button>
                 <button
                   onClick={handleClear}
@@ -2424,18 +2631,6 @@ ${bodyContent}
                     <h3 className="m-0 text-[14px] text-[#11161d]">Letter of Authorization</h3>
                     <div className="ml-auto flex gap-[7px]">
                       <button
-                        onClick={handleImproveLOA}
-                        disabled={!aiAvailable || aiLoading || !soa}
-                        className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] inline-flex items-center gap-[5px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          background: "linear-gradient(160deg, #d8bb63, #c5a44e)",
-                          color: "#3a2e08",
-                          border: "none",
-                        }}
-                      >
-                        ✦ Improve LOA
-                      </button>
-                      <button
                         onClick={() => handleCopy("soa")}
                         className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150"
                       >
@@ -2457,18 +2652,6 @@ ${bodyContent}
                 <h3 className="m-0 text-[14px] text-[#11161d]">Summary of Action</h3>
                 <div className="ml-auto flex gap-[7px]">
                   <button
-                    onClick={handleImproveSOA}
-                    disabled={!aiAvailable || aiLoading || !soa}
-                    className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] inline-flex items-center gap-[5px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      background: "linear-gradient(160deg, #d8bb63, #c5a44e)",
-                      color: "#3a2e08",
-                      border: "none",
-                    }}
-                  >
-                    ✦ Improve SOA
-                  </button>
-                  <button
                     onClick={() => handleCopy("soa")}
                     className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150"
                   >
@@ -2487,18 +2670,6 @@ ${bodyContent}
               <div id="citation-output" className="scroll-mt-[96px] flex items-center gap-[10px] mb-[10px] mt-5">
                 <h3 className="m-0 text-[14px] text-[#11161d]">Proposed Citation</h3>
                 <div className="ml-auto flex gap-[7px]">
-                  <button
-                    onClick={handleExpandCitation}
-                    disabled={!aiAvailable || aiLoading || !citation}
-                    className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] inline-flex items-center gap-[5px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      background: "linear-gradient(160deg, #aecff0, #8bb8e0)",
-                      color: "#1a3a5c",
-                      border: "none",
-                    }}
-                  >
-                    ⇲ Expand Citation
-                  </button>
                   <button
                     onClick={handleToggleSpell}
                     className={`cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] transition-colors ${
@@ -2573,24 +2744,6 @@ ${bodyContent}
               {/* ---- Action buttons (shown for both OVSM and standard awards) ---- */}
               <div className="flex flex-wrap gap-[9px] mt-4">
                 <button
-                  onClick={handleRefineAI}
-                  disabled={!aiAvailable || aiLoading}
-                  className="cursor-pointer text-[13.5px] font-semibold px-[15px] py-[10px] rounded-[9px] inline-flex items-center gap-2 text-[#3a2e08] transition-transform duration-[.08s] active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: "linear-gradient(160deg, #d8bb63, #c5a44e)",
-                    boxShadow: "0 6px 16px rgba(197,164,78,.32)",
-                  }}
-                >
-                  {aiLoading ? (
-                    <>
-                      <span className="w-[14px] h-[14px] border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                      Refining…
-                    </>
-                  ) : (
-                    "✦ Refine Wording with AI"
-                  )}
-                </button>
-                <button
                   onClick={handleRevalidate}
                   className="cursor-pointer text-[13.5px] font-semibold px-[15px] py-[10px] rounded-[9px] inline-flex items-center gap-2 bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150 active:translate-y-px"
                 >
@@ -2612,19 +2765,19 @@ ${bodyContent}
                         onClick={handleExportWord}
                         className="w-full text-left text-[13px] font-medium px-[14px] py-[10px] text-[#3a414b] hover:bg-[#f6f3ea] hover:text-[#a01722] transition-colors border-b border-[#efe9dc]"
                       >
-                        Export as Word (.docx)
+                        Export Word (.docx)
                       </button>
                       <button
                         onClick={handleExportPDF}
                         className="w-full text-left text-[13px] font-medium px-[14px] py-[10px] text-[#3a414b] hover:bg-[#f6f3ea] hover:text-[#a01722] transition-colors border-b border-[#efe9dc]"
                       >
-                        Export as PDF
+                        Export PDF
                       </button>
                       <button
                         onClick={handleExportBoth}
                         className="w-full text-left text-[13px] font-medium px-[14px] py-[10px] text-[#3a414b] hover:bg-[#f6f3ea] hover:text-[#a01722] transition-colors"
                       >
-                        Export Both (.docx + PDF)
+                        Export Award Package
                       </button>
                     </div>
                   )}
@@ -2685,6 +2838,20 @@ ${bodyContent}
                   Compliance Score
                 </div>
               </div>
+              {form.achievements.trim() && (
+                <div className="flex items-center gap-3">
+                  <ScoreRing
+                    pct={currentAwardMatch.score}
+                    errors={currentAwardMatch.severity === "severe" ? 1 : 0}
+                  />
+                  <div className="text-[12.5px] text-[#6b6f76]">
+                    <b className="block text-[#11161d] text-[14px]">
+                      Award Justification: {currentAwardMatch.score}%
+                    </b>
+                    <span>{currentAwardMatch.recommendations[0] || `Recommended award level: ${awardShortLabel(currentAwardMatch.recommendedAward)}.`}</span>
+                  </div>
+                </div>
+              )}
               {/* Quality Score */}
               {qualityScores && (
                 <>
@@ -2712,7 +2879,6 @@ ${bodyContent}
                       { label: "Strong action verbs", score: qualityScores.strongVerbs },
                       { label: "Leadership language", score: qualityScores.leadershipLanguage },
                       { label: "Result-oriented", score: qualityScores.resultOriented },
-                      { label: "Award level match", score: qualityScores.awardLevelMatch },
                     ].map((item) => (
                       <div key={item.label} className="flex items-center gap-[8px]">
                         <span className="text-[11px] text-[#6b6f76] w-[120px] shrink-0 truncate">{item.label}</span>
