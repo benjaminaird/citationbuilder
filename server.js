@@ -24,7 +24,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "dist")));
@@ -275,9 +275,31 @@ app.post("/api/improve", async (req, res) => {
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       console.error("Anthropic API error:", response.status, detail.slice(0, 500));
-      return res
-        .status(502)
-        .json({ error: "The AI service returned an error. Please try again." });
+
+      let providerMessage = "";
+      try {
+        const parsedDetail = JSON.parse(detail);
+        providerMessage = parsedDetail?.error?.message || parsedDetail?.message || "";
+      } catch {
+        providerMessage = detail;
+      }
+
+      const cleanProviderMessage = String(providerMessage).replace(/\s+/g, " ").trim();
+      const modelHint = response.status === 404 || /model/i.test(cleanProviderMessage)
+        ? ` Check ANTHROPIC_MODEL; this deploy is using ${ANTHROPIC_MODEL}.`
+        : "";
+      const authHint = response.status === 401
+        ? " Check that ANTHROPIC_API_KEY is set correctly in Render."
+        : "";
+      const quotaHint = response.status === 402 || response.status === 429
+        ? " Check Anthropic billing, credits, or rate limits."
+        : "";
+
+      return res.status(502).json({
+        error: `Anthropic returned ${response.status}.${authHint}${quotaHint}${modelHint}${
+          cleanProviderMessage ? ` ${cleanProviderMessage}` : " Please try again."
+        }`,
+      });
     }
 
     const data = await response.json();

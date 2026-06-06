@@ -1503,7 +1503,7 @@ ${bodyContent}
             }}
           >
             <img
-              src="/favicon.png"
+              src="/icon.png"
               alt="CitationBuilder"
               className="w-full h-full object-cover"
             />
@@ -1536,7 +1536,7 @@ ${bodyContent}
       }}>
         <div className="max-w-[1480px] mx-auto px-[14px] sm:px-[18px] lg:px-[22px] py-[10px] sm:py-[12px] lg:py-[14px] flex items-center gap-3 sm:gap-4">
           <img
-            src="/favicon.png"
+            src="/icon.png"
             alt="CitationBuilder"
             className="w-[34px] h-[34px] sm:w-[38px] sm:h-[38px] lg:w-[42px] lg:h-[42px] rounded-[8px] sm:rounded-[10px] shrink-0 object-cover"
             style={{
