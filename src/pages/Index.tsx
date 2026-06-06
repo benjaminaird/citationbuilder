@@ -62,6 +62,30 @@ interface QualityScores {
   overall: number;
 }
 
+interface AwardMatchResult {
+  score: number;
+  severity: "none" | "possible" | "severe";
+  title: string;
+  detail: string;
+  recommendations: string[];
+}
+
+interface WeakInputIssue {
+  title: string;
+  detail: string;
+}
+
+interface SavedDraft {
+  id: string;
+  name: string;
+  form: FormState;
+  soa: string;
+  citation: string;
+  aiNotes: string[];
+  updatedAt: string;
+  createdAt: string;
+}
+
 // ---- Constants ----
 const RANKS = [
   "Private", "Private First Class", "Lance Corporal", "Corporal", "Sergeant",
@@ -137,6 +161,7 @@ const CATEGORY_COLORS: Record<AchievementCategory, string> = {
 
 const UNIT_CANON = "Marine Barracks, Washington, D.C.,";
 const STORAGE_KEY = "citationbuilder.form";
+const SAVED_DRAFTS_KEY = "citationbuilder.savedDrafts";
 
 // ---- Helpers ----
 function expandAbbr(text: string): string {
@@ -168,13 +193,177 @@ function classifyAll(lines: string[]): ClassifiedAchievement[] {
   return lines.map((l) => ({ text: l.replace(/^[-•*\d.)\s]+/, "").trim(), category: classifyAchievement(l) }));
 }
 
-// ---- Quality Scoring ----
+// ---- Quality & Award Fit Scoring ----
 const STRONG_VERBS = /\b(led|spearheaded|orchestrated|directed|championed|galvanized|transformed|revitalized|modernized|overhauled|pioneered|executed|coordinated|mentored|cultivated|engineered|fortified|streamlined|optimized|accelerated|catapulted)\b/i;
 const LEADERSHIP_TERMS = /\b(leadership|initiative|judgment|responsibility|accountability|stewardship|guidance|mentorship|example|standard)\b/i;
 const RESULT_TERMS = /\b(resulted in|yielded|achieved|attained|produced|generated|delivered|improved|increased|reduced|eliminated|exceeded|surpassed|enhanced)\b/i;
 const QUANTIFIABLE = /\b(\d+\s*(percent|%|Marines?|Sailors?|personnel|events?|hours?|days?|weeks?|months?|dollars?|\$))\b|\b(zero|no)\s+(discrepanc|error|failure|incident|loss)/i;
 
-function scoreQuality(citation: string): QualityScores {
+const SCOPE_TERMS = {
+  individual: /\b(individual|personally|single|shop|desk|task)\b/i,
+  section: /\b(section|team|squad|platoon|detail|watch|shift|cell)\b/i,
+  unit: /\b(unit|company|battery|detachment|battalion|squadron|command)\b/i,
+  command: /\b(command-wide|regiment|group|wing|base|installation|headquarters|enterprise)\b/i,
+  service: /\b(service-wide|marine corps|navy|department|institutional|enterprise-wide|force-wide)\b/i,
+};
+
+function achievementLines(form: FormState): string[] {
+  return form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+function countMatches(text: string, re: RegExp): number {
+  const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
+  return (text.match(new RegExp(re.source, flags)) || []).length;
+}
+
+function rankSeniority(rank: string): number {
+  const r = rank.toLowerCase();
+  if (/private|lance corporal/.test(r)) return 1;
+  if (/corporal|sergeant$/.test(r)) return 2;
+  if (/staff sergeant|gunnery sergeant/.test(r)) return 3;
+  if (/master sergeant|first sergeant|master gunnery sergeant|sergeant major/.test(r)) return 4;
+  if (/second lieutenant|first lieutenant|captain|warrant officer|chief warrant officer 2/.test(r)) return 3;
+  if (/major|lieutenant colonel|colonel|chief warrant officer 3|chief warrant officer 4|chief warrant officer 5/.test(r)) return 4;
+  return 2;
+}
+
+function awardLevel(award: AwardKey): number {
+  if (award === "CERTCOM") return 0;
+  if (award === "NAM" || award === "OVSM") return 1;
+  if (award === "NMC") return 2;
+  if (award === "MSM") return 3;
+  if (award === "LOM") return 4;
+  return 1;
+}
+
+function billetScope(billet: string): number {
+  const b = billet.toLowerCase();
+  if (/commander|commanding officer|executive officer|sergeant major|director|chief of staff|department head/.test(b)) return 4;
+  if (/officer in charge|oic|sncoic|ncoic|first sergeant|operations chief|company|battalion|section head/.test(b)) return 3;
+  if (/platoon|section|team|squad|supervisor|leader|chief/.test(b)) return 2;
+  if (b.trim()) return 1;
+  return 0;
+}
+
+function scopeLevel(text: string): number {
+  if (SCOPE_TERMS.service.test(text)) return 4;
+  if (SCOPE_TERMS.command.test(text)) return 4;
+  if (SCOPE_TERMS.unit.test(text)) return 3;
+  if (SCOPE_TERMS.section.test(text)) return 2;
+  if (SCOPE_TERMS.individual.test(text)) return 1;
+  return 1;
+}
+
+function analyzeWeakInput(form: FormState): WeakInputIssue[] {
+  const text = form.achievements;
+  if (!text.trim()) {
+    return [{
+      title: "Accomplishments missing",
+      detail: "Add actions, measurable impact, scope of responsibility, results, and operational significance before submission.",
+    }];
+  }
+
+  const issues: WeakInputIssue[] = [];
+  if (!QUANTIFIABLE.test(text)) {
+    issues.push({
+      title: "Missing measurable impact",
+      detail: "Add numbers, personnel affected, events supported, readiness impact, time saved, money saved, or command-level effect.",
+    });
+  }
+  if (!/(responsib|supervis|managed|led|oversaw|section|platoon|team|unit|command|personnel|marines|sailors)/i.test(text + " " + form.billet)) {
+    issues.push({
+      title: "Missing scope of responsibility",
+      detail: "State who or what the Marine was responsible for: personnel, programs, events, equipment, mission areas, or command functions.",
+    });
+  }
+  if (!RESULT_TERMS.test(text)) {
+    issues.push({
+      title: "Missing result",
+      detail: "Show what changed because of the action: readiness improved, errors reduced, events completed, timelines met, or mission risk lowered.",
+    });
+  }
+  if (!LEADERSHIP_TERMS.test(text) && !/led|supervised|mentored|trained|guided|directed/i.test(text)) {
+    issues.push({
+      title: "Missing leadership effect",
+      detail: "Describe how the Marine influenced others, raised standards, trained personnel, improved performance, or enabled the chain of command.",
+    });
+  }
+  if (!/(mission|readiness|operational|command|inspection|ceremonial|deployment|exercise|training|support)/i.test(text)) {
+    issues.push({
+      title: "Missing operational significance",
+      detail: "Tie the accomplishment to mission execution, command priorities, readiness, ceremonial support, inspections, or unit effectiveness.",
+    });
+  }
+  return issues;
+}
+
+function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
+  const text = `${form.achievements} ${citation}`.trim();
+  const lines = achievementLines(form);
+  if (!form.achievements.trim() && !citation.trim()) {
+    return {
+      score: 70,
+      severity: "none",
+      title: "Award level not yet assessed",
+      detail: "Add accomplishments to assess award level.",
+      recommendations: [],
+    };
+  }
+  const rank = rankSeniority(form.rank);
+  const billet = billetScope(form.billet);
+  const scope = scopeLevel(`${form.billet} ${text}`);
+  const quant = Math.min(4, countMatches(text, QUANTIFIABLE));
+  const leadership = Math.min(4, countMatches(text, STRONG_VERBS) + countMatches(text, LEADERSHIP_TERMS));
+  const results = Math.min(4, countMatches(text, RESULT_TERMS));
+  const language = /(transformational|institutional|service-wide|command-wide|enduring|exceptional|monumental|strategic|enterprise)/i.test(text) ? 2 : 0;
+  const support = Math.min(4, Math.round((rank + billet + scope + Math.min(4, lines.length) + quant + leadership + results + language) / 7));
+  const selected = awardLevel(form.award);
+  const diff = selected - support;
+
+  let severity: AwardMatchResult["severity"] = "none";
+  let title = "Award level appears supportable";
+  let detail = "Rank, billet, scope, and accomplishment detail generally match the selected award level.";
+  const recommendations: string[] = [];
+
+  if (form.award === "LOM" && rank <= 2 && support <= 2) {
+    severity = "severe";
+    title = "High Award Mismatch Warning";
+    detail = "The selected award may not be appropriate for the rank, billet, and scope entered. Review award level before submission.";
+    recommendations.push("This does not currently support an LOM.");
+    recommendations.push("This reads more like a NAM or Navy Comm unless major command-level impact is added.");
+  } else if (diff >= 2) {
+    severity = "severe";
+    title = "High Award Mismatch Warning";
+    detail = "The selected award may not be appropriate for the rank, billet, and scope entered. Review award level before submission.";
+    recommendations.push(`This does not currently support an ${form.award}.`);
+    recommendations.push("Add sustained leadership, measurable command-level impact, and broader organizational results.");
+  } else if (diff === 1) {
+    severity = "possible";
+    title = "Possible award mismatch";
+    detail = "The selected award may be high for the current rank, billet, and accomplishment scope.";
+    recommendations.push(form.award === "NMC"
+      ? "This may support a Navy Comm if stronger command-level impact is added."
+      : `This reads more like a ${support <= 1 ? "NAM" : "Navy Comm"}.`);
+  }
+
+  if (selected <= 1 && rank >= 4 && (scope >= 3 || leadership >= 2 || quant >= 2)) {
+    severity = severity === "severe" ? "severe" : "possible";
+    title = "Possible award mismatch";
+    detail = "The selected award may be low for the rank, billet, and apparent scope entered.";
+    recommendations.push("This may be under-awarded; consider Navy Comm/MSM.");
+  }
+
+  if (!recommendations.length) {
+    if (selected === 1) recommendations.push("This reads like a NAM when impact remains local and individual.");
+    if (selected === 2) recommendations.push("This may support a Navy Comm when command-level impact is clear.");
+    if (selected >= 3) recommendations.push("Ensure the write-up shows sustained leadership, organizational impact, and measurable results.");
+  }
+
+  const score = Math.max(15, Math.min(100, 100 - Math.abs(diff) * 25 - (severity === "severe" ? 20 : severity === "possible" ? 8 : 0)));
+  return { score, severity, title, detail, recommendations: Array.from(new Set(recommendations)).slice(0, 3) };
+}
+
+function scoreQuality(citation: string, form: FormState): QualityScores {
   const text = citation || "";
   const qi = (text.match(QUANTIFIABLE) || []).length;
   const sv = (text.match(STRONG_VERBS) || []).length;
@@ -187,11 +376,7 @@ function scoreQuality(citation: string): QualityScores {
   const llScore = Math.min(100, Math.round((ll / 4) * 100));
   const roScore = Math.min(100, Math.round((ro / 4) * 100));
 
-  // Award level match: check that language matches scope of award
-  let awardMatch = 70;
-  // Higher award language indicators
-  const highAward = /\b(transformational|institutional|service-wide|corps-wide|enduring|lasting|profound|exceptional|outstanding|monumental)\b/i;
-  if (highAward.test(text)) awardMatch = 90;
+  const awardMatch = awardMatchScore(form, citation).score;
 
   const overall = Math.round((qiScore * 0.25) + (svScore * 0.25) + (llScore * 0.20) + (roScore * 0.20) + (awardMatch * 0.10));
 
@@ -265,21 +450,58 @@ function expandCitationLocally(citation: string, targetLow: number, maxChars: nu
   return expanded;
 }
 
-function enforceWashington(text: string): string {
-  let out = text.replace(
-    /Marine Barracks,?\s+Washington,?\s*(D\.?C\.?)?(?!\w)/gi,
-    UNIT_CANON.replace(/,$/, "") + ","
-  );
+function normalizeWashingtonDC(text: string): string {
+  let out = text;
+  out = out.replace(/Washington,?\s*D\.?\s*C\.?/gi, "Washington, D.C.");
+  out = out.replace(/Marine Barracks,?\s+Washington,\s*D\.C\./gi, UNIT_CANON);
+  out = out.replace(/D\.C\.,\s*,+/gi, "D.C.,");
+  out = out.replace(/D\.C\.,\s*\./gi, "D.C.");
+  out = out.replace(/D\.C\.\s*,\s*(?=(from|while|for|during|and|in|with)\b)/gi, "D.C., ");
+  out = out.replace(/D\.C\.,\s*$/gi, "D.C.");
   out = out.replace(/,\s*,/g, ",");
+  out = out.replace(/\s+([,.])/g, "$1");
   return out;
 }
 
+function enforceWashington(text: string): string {
+  return normalizeWashingtonDC(text);
+}
+
 function cleanup(text: string): string {
-  return text
+  return normalizeWashingtonDC(text)
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function parseServiceDate(value: string): Date | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const monthMap: Record<string, number> = {
+    jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+    may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8,
+    sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
+  };
+  const monthYear = raw.match(/\b([A-Za-z]+)\s+(\d{4})\b/);
+  if (monthYear) {
+    const month = monthMap[monthYear[1].toLowerCase()];
+    if (month !== undefined) return new Date(Number(monthYear[2]), month, 1);
+  }
+  const iso = raw.match(/\b(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?\b/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, 1);
+  const short = raw.match(/\b(\d{1,2})[-/](\d{4})\b/);
+  if (short) return new Date(Number(short[2]), Number(short[1]) - 1, 1);
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function dateOrderError(form: FormState): string | null {
+  if (!form.dateFrom || !form.dateTo) return null;
+  const from = parseServiceDate(form.dateFrom);
+  const to = parseServiceDate(form.dateTo);
+  if (!from || !to) return null;
+  return to.getTime() < from.getTime() ? "End date cannot be before start date." : null;
 }
 
 function applyCase(text: string, mode: "upper" | "sentence"): string {
@@ -643,10 +865,27 @@ function assembleCitation(form: FormState): string {
 function runChecks(citation: string, soa: string, form: FormState): CheckItem[] {
   const cfg = AWARDS[form.award];
   const checks: CheckItem[] = [];
+  const dateErr = dateOrderError(form);
+  if (dateErr) {
+    checks.push({ status: "err", title: "Date order", detail: dateErr });
+  }
+
+  const match = awardMatchScore(form, citation || soa);
+  if (match.severity !== "none") {
+    checks.push({
+      status: match.severity === "severe" ? "err" : "warn",
+      title: match.title,
+      detail: `${match.detail} ${match.recommendations.join(" ")}`,
+    });
+  }
+
+  for (const issue of analyzeWeakInput(form)) {
+    checks.push({ status: "warn", title: issue.title, detail: issue.detail });
+  }
 
   // OVSM uses LOA format — different validation
   if (cfg.isLOA) {
-    if (!soa) return [];
+    if (!soa) return checks;
 
     // LOA content check
     if (/LETTER OF AUTHORIZATION/i.test(soa)) {
@@ -701,7 +940,7 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
     return checks;
   }
 
-  if (!citation) return [];
+  if (!citation) return checks;
 
   // Unit formatting
   const badUnit = /Marine Barracks\s+Washington\s+DC\b/i.test(citation)
@@ -717,9 +956,9 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   // Washington, D.C.
   if (/Washington/i.test(citation)) {
     checks.push(
-      /Washington,\s*D\.C\./i.test(citation)
+      /Washington,\s*D\.C\./i.test(citation) && !/D\.C\.,[,.]/i.test(citation)
         ? { status: "ok", title: "Washington, D.C.", detail: "Properly formatted." }
-        : { status: "err", title: "Washington, D.C.", detail: "Use \"Washington, D.C.\" with periods.", fixId: "fixUnit" }
+        : { status: "err", title: "Washington, D.C.", detail: "Use \"Washington, D.C.\" and avoid \"D.C.,.\" or \"D.C.,,\".", fixId: "fixUnit" }
     );
   }
 
@@ -819,10 +1058,6 @@ const DEFAULT_FORM: FormState = {
 
 // ---- Storage ----
 function loadForm(): FormState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULT_FORM, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
   return { ...DEFAULT_FORM };
 }
 
@@ -830,6 +1065,48 @@ function saveForm(form: FormState, soa: string, citation: string) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...form, _soa: soa, _citation: citation }));
   } catch { /* ignore */ }
+}
+
+function loadSavedDrafts(): SavedDraft[] {
+  try {
+    const raw = localStorage.getItem(SAVED_DRAFTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedDrafts(drafts: SavedDraft[]) {
+  try {
+    localStorage.setItem(SAVED_DRAFTS_KEY, JSON.stringify(drafts));
+  } catch { /* ignore */ }
+}
+
+function draftLabel(form: FormState): string {
+  const who = [form.rank, form.lastName].filter(Boolean).join(" ").trim() || "Untitled award";
+  return `${who} ${form.award}`.trim();
+}
+
+function makeDraft(form: FormState, soa: string, citation: string, aiNotes: string[], existing?: SavedDraft): SavedDraft {
+  const now = new Date().toISOString();
+  return {
+    id: existing?.id || `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: existing?.name || draftLabel(form),
+    form: { ...form },
+    soa,
+    citation,
+    aiNotes: [...aiNotes],
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function formatDraftDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 // ---- Sub-components ----
@@ -900,11 +1177,17 @@ export default function Index() {
   const [exportOpen, setExportOpen] = useState<boolean>(false);
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [showStartupDialog, setShowStartupDialog] = useState<boolean>(false);
+  const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>(loadSavedDrafts);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const hasRestored = useRef(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
   const cfg = AWARDS[form.award];
   const p = PRONOUNS[form.pronoun];
+  const dateErr = dateOrderError(form);
+  const currentAwardMatch = awardMatchScore(form, citation || soa);
+  const currentWeakInput = analyzeWeakInput(form);
+  const hasHardValidationError = Boolean(dateErr);
 
   // Show splash for 3.5s, then check for saved draft
   useEffect(() => {
@@ -922,6 +1205,7 @@ export default function Index() {
             return;
           }
         }
+        if (loadSavedDrafts().length) setShowStartupDialog(true);
       } catch { /* ignore */ }
     }, 3500);
     return () => clearTimeout(timer);
@@ -953,6 +1237,7 @@ export default function Index() {
             setChecks(runChecks(saved._citation || "", saved._soa || "", restored));
           }
         }
+        setActiveDraftId(null);
       }
     } catch { /* ignore */ }
     setShowStartupDialog(false);
@@ -968,12 +1253,13 @@ export default function Index() {
     setAiNotes([]);
     setClassifiedAchievements([]);
     setQualityScores(null);
+    setActiveDraftId(null);
     setShowStartupDialog(false);
   }
 
   function handleNewAward() {
     if (form.lastName || form.achievements) {
-      if (!window.confirm("Start a completely new award? All current data and the saved draft will be cleared.")) return;
+      if (!window.confirm("Start a completely new award? Current unsaved fields will be cleared. Saved drafts will remain.")) return;
     }
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     setForm({ ...DEFAULT_FORM });
@@ -984,7 +1270,71 @@ export default function Index() {
     setClassifiedAchievements([]);
     setQualityScores(null);
     setAiBanner({ show: false, over: false, message: "" });
+    setActiveDraftId(null);
     toast.success("New award started");
+  }
+
+  function handleOpenDraftsFromStartup() {
+    setShowStartupDialog(false);
+    window.setTimeout(() => document.getElementById("saved-drafts")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
+  function handleSaveDraft() {
+    const existing = activeDraftId ? savedDrafts.find((d) => d.id === activeDraftId) : undefined;
+    const draft = makeDraft(form, soa, citation, aiNotes, existing);
+    const next = existing
+      ? savedDrafts.map((d) => d.id === draft.id ? draft : d)
+      : [draft, ...savedDrafts];
+    setSavedDrafts(next);
+    persistSavedDrafts(next);
+    setActiveDraftId(draft.id);
+    toast.success(existing ? "Draft updated" : "Draft saved");
+  }
+
+  function handleRenameDraft(id: string) {
+    const draft = savedDrafts.find((d) => d.id === id);
+    if (!draft) return;
+    const name = window.prompt("Rename draft", draft.name);
+    if (!name || !name.trim()) return;
+    const next = savedDrafts.map((d) => d.id === id ? { ...d, name: name.trim(), updatedAt: new Date().toISOString() } : d);
+    setSavedDrafts(next);
+    persistSavedDrafts(next);
+    toast.success("Draft renamed");
+  }
+
+  function handleOpenSavedDraft(id: string) {
+    const draft = savedDrafts.find((d) => d.id === id);
+    if (!draft) return;
+    setForm({ ...DEFAULT_FORM, ...draft.form });
+    setSoa(draft.soa || "");
+    setCitation(draft.citation || "");
+    setAiNotes(draft.aiNotes || []);
+    setChecks(runChecks(draft.citation || "", draft.soa || "", { ...DEFAULT_FORM, ...draft.form }));
+    setQualityScores(draft.citation ? scoreQuality(draft.citation, { ...DEFAULT_FORM, ...draft.form }) : null);
+    setClassifiedAchievements(classifyAll(achievementLines(draft.form)));
+    setAiBanner({ show: false, over: false, message: "" });
+    setActiveDraftId(id);
+    toast.success("Draft opened");
+  }
+
+  function handleDuplicateDraft(id: string) {
+    const draft = savedDrafts.find((d) => d.id === id);
+    if (!draft) return;
+    const copy = makeDraft(draft.form, draft.soa, draft.citation, draft.aiNotes);
+    copy.name = `${draft.name} copy`;
+    const next = [copy, ...savedDrafts];
+    setSavedDrafts(next);
+    persistSavedDrafts(next);
+    toast.success("Draft duplicated");
+  }
+
+  function handleDeleteDraft(id: string) {
+    if (!window.confirm("Delete this saved draft?")) return;
+    const next = savedDrafts.filter((d) => d.id !== id);
+    setSavedDrafts(next);
+    persistSavedDrafts(next);
+    if (activeDraftId === id) setActiveDraftId(null);
+    toast.success("Draft deleted");
   }
 
   // Check AI status
@@ -1018,6 +1368,11 @@ export default function Index() {
   }, [form]);
 
   function handleGenerate() {
+    if (dateErr) {
+      setChecks(runChecks(citation, soa, form));
+      toast.error(dateErr);
+      return;
+    }
     const missing: string[] = [];
     if (!form.lastName) missing.push("last name");
     if (!form.billet) missing.push("billet");
@@ -1061,7 +1416,7 @@ export default function Index() {
     setClassifiedAchievements(classifyAll(lines));
 
     // Compute quality score
-    setQualityScores(scoreQuality(newCitation));
+    setQualityScores(scoreQuality(newCitation, form));
 
     setSoa(newSoa);
     setCitation(newCitation);
@@ -1072,7 +1427,7 @@ export default function Index() {
   }
 
   function handleClear() {
-    if (!window.confirm("Clear the form and drafts? Autosaved data will be removed.")) return;
+    if (!window.confirm("Clear the form? Saved drafts will remain.")) return;
     setForm({ ...DEFAULT_FORM });
     setSoa("");
     setCitation("");
@@ -1081,6 +1436,7 @@ export default function Index() {
     setClassifiedAchievements([]);
     setQualityScores(null);
     setAiBanner({ show: false, over: false, message: "" });
+    setActiveDraftId(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     toast.success("Form cleared");
   }
@@ -1095,7 +1451,7 @@ export default function Index() {
 
   function handleRevalidate() {
     setChecks(runChecks(citation, soa, form));
-    setQualityScores(scoreQuality(citation));
+    setQualityScores(scoreQuality(citation, form));
   }
 
   function handleCopy(kind: "soa" | "citation") {
@@ -1384,7 +1740,7 @@ ${bodyContent}
       let outCite = applyCase(cleanup(enforceWashington(expandAbbr(d.citation || citation))), cfg.casing);
       setCitation(outCite);
       setChecks(runChecks(outCite, soa, form));
-      setQualityScores(scoreQuality(outCite));
+      setQualityScores(scoreQuality(outCite, form));
 
       const notes = Array.isArray(d.notes) ? d.notes.map((n: unknown) => String(n)).slice(0, 8) : [];
       setAiNotes(notes);
@@ -1447,7 +1803,7 @@ ${bodyContent}
         setSoa(outSoa);
         setCitation(outCite);
         setChecks(runChecks(outCite, outSoa, form));
-        setQualityScores(scoreQuality(outCite));
+        setQualityScores(scoreQuality(outCite, form));
 
         const notes = Array.isArray(d.notes) ? d.notes.map((n: unknown) => String(n)).slice(0, 8) : [];
         setAiNotes(notes);
@@ -1573,7 +1929,7 @@ ${bodyContent}
               </div>
               <h2 className="m-0 text-[18px] font-bold text-[#11161d]">Previous Draft Found</h2>
               <p className="m-0 mt-[8px] text-[13.5px] text-[#6b6f76] leading-[1.5]">
-                A saved award draft exists in this browser. Would you like to restore it or start fresh?
+                Saved award work exists in this browser. Start blank, restore the previous autosave, or open Saved Drafts.
               </p>
             </div>
             <div className="grid gap-[10px]">
@@ -1590,6 +1946,12 @@ ${bodyContent}
               >
                 Start New Award
               </button>
+              <button
+                onClick={handleOpenDraftsFromStartup}
+                className="cursor-pointer text-[14px] font-semibold px-[20px] py-[13px] rounded-[10px] bg-[#f6f3ea] border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150 active:translate-y-px"
+              >
+                Open Saved Drafts
+              </button>
             </div>
             <p className="m-0 mt-[14px] text-[11px] text-[#aeb6c2] text-center">
               Drafts are saved only in this browser. No data is shared across users or devices.
@@ -1601,11 +1963,30 @@ ${bodyContent}
       <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes splashEnter{from{opacity:0}to{opacity:1}}@keyframes splashPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}`}</style>
 
       {/* Main layout — responsive: stacked on mobile, 3-col on desktop */}
+      <nav className="lg:hidden sticky top-[58px] z-30 max-w-[1480px] mx-auto px-[14px] pt-[10px]">
+        <div className="flex gap-[6px] overflow-x-auto rounded-[10px] border border-[#dcd6c8] bg-white/95 p-[6px] shadow-[0_6px_18px_rgba(17,22,29,.08)]">
+          {[
+            ["details", "Details"],
+            ["accomplishments", "Accomplishments"],
+            ["outputs", cfg.isLOA ? "LOA" : "SOA"],
+            ["citation-output", cfg.isLOA ? "Validation" : "Citation"],
+            ["validation", "Validation"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="shrink-0 text-[12px] font-semibold px-[10px] py-[7px] rounded-[8px] bg-[#f6f3ea] text-[#3a414b] border border-transparent"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </nav>
       <main className="cb-grid max-w-[1480px] mx-auto p-[14px] sm:p-[18px] lg:p-[22px] items-start">
         {/* ---- SECTION 1: Inputs ---- */}
         <section className="flex flex-col gap-[18px]">
           {/* Award & Service Details */}
-          <div className="bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
+          <div id="details" className="scroll-mt-[96px] bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
             <div className="flex items-center gap-[10px] p-[14px_16px] border-b border-[#dcd6c8]">
               <span className="w-[22px] h-[22px] rounded-[6px] shrink-0 grid place-items-center text-[12px] font-extrabold bg-[#a01722] text-[#e6d29a]">1</span>
               <h2 className="m-0 text-[13px] uppercase tracking-[.12em] text-[#11161d]">Award & Service Details</h2>
@@ -1668,6 +2049,11 @@ ${bodyContent}
                   />
                 </div>
               </div>
+              {dateErr && (
+                <div className="text-[12px] font-semibold text-[#7c1d13] bg-[#fef7f6] border border-[#f0b8b3] rounded-[9px] p-[9px_11px]">
+                  {dateErr}
+                </div>
+              )}
 
               {/* First Name + EDIPI */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
@@ -1830,7 +2216,7 @@ ${bodyContent}
           </div>
 
           {/* Accomplishments */}
-          <div className="bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
+          <div id="accomplishments" className="scroll-mt-[96px] bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
             <div className="flex items-center gap-[10px] p-[14px_16px] border-b border-[#dcd6c8]">
               <span className="w-[22px] h-[22px] rounded-[6px] shrink-0 grid place-items-center text-[12px] font-extrabold bg-[#a01722] text-[#e6d29a]">2</span>
               <h2 className="m-0 text-[13px] uppercase tracking-[.12em] text-[#11161d]">
@@ -1901,13 +2287,43 @@ ${bodyContent}
                 </div>
               )}
 
+              {form.achievements.trim() && currentWeakInput.length > 0 && (
+                <div className="rounded-[10px] border border-[#e6c98b] bg-[#fdf8f0] p-[10px_12px] text-[12.5px] leading-[1.45] text-[#5b4a13]">
+                  <b className="block uppercase tracking-[.08em] text-[11px] mb-[3px]">Weak input guidance</b>
+                  <ul className="m-0 pl-[18px]">
+                    {currentWeakInput.slice(0, 3).map((issue) => (
+                      <li key={issue.title} className="mb-[3px]">
+                        <b>{issue.title}:</b> {issue.detail}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {currentAwardMatch.severity !== "none" && (
+                <div
+                  className="text-[12.5px] leading-[1.45] rounded-[10px] p-[10px_12px] border"
+                  style={{
+                    background: currentAwardMatch.severity === "severe" ? "#fef7f6" : "#fdf8f0",
+                    borderColor: currentAwardMatch.severity === "severe" ? "#f0b8b3" : "#e6c98b",
+                    color: currentAwardMatch.severity === "severe" ? "#7c1d13" : "#5b4a13",
+                  }}
+                >
+                  <b className="block uppercase tracking-[.08em] text-[11px] mb-[3px]">{currentAwardMatch.title}</b>
+                  {currentAwardMatch.detail}
+                  <span className="block mt-[4px]">{currentAwardMatch.recommendations[0]}</span>
+                </div>
+              )}
+
               <div className="flex flex-wrap gap-[9px]">
                 <button
                   onClick={handleGenerate}
+                  disabled={hasHardValidationError}
                   className="cursor-pointer text-[13.5px] font-semibold px-[15px] py-[10px] rounded-[9px] inline-flex items-center gap-2 text-white transition-transform duration-[.08s] active:translate-y-px"
                   style={{
-                    background: "linear-gradient(160deg, #a01722, #7c0f19)",
+                    background: hasHardValidationError ? "#aeb6c2" : "linear-gradient(160deg, #a01722, #7c0f19)",
                     boxShadow: "0 6px 16px rgba(160,23,34,.28)",
+                    cursor: hasHardValidationError ? "not-allowed" : "pointer",
                   }}
                 >
                   {cfg.isLOA ? "Generate Letter of Authorization" : "Generate SOA & Citation"}
@@ -1927,10 +2343,51 @@ ${bodyContent}
               </div>
             </div>
           </div>
+
+          {/* Saved Drafts */}
+          <div id="saved-drafts" className="scroll-mt-[96px] bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
+            <div className="flex items-center gap-[10px] p-[14px_16px] border-b border-[#dcd6c8]">
+              <span className="w-[22px] h-[22px] rounded-[6px] shrink-0 grid place-items-center text-[12px] font-extrabold bg-[#a01722] text-[#e6d29a]">S</span>
+              <h2 className="m-0 text-[13px] uppercase tracking-[.12em] text-[#11161d]">Saved Drafts</h2>
+              <button
+                onClick={handleSaveDraft}
+                className="ml-auto cursor-pointer text-[12px] font-semibold px-[11px] py-[7px] rounded-[8px] bg-[#f0ece2] text-[#3a414b] hover:bg-[#e7e1d4] transition-colors"
+              >
+                {activeDraftId ? "Update Draft" : "Save Current"}
+              </button>
+            </div>
+            <div className="p-3 grid gap-[8px]">
+              {savedDrafts.length ? savedDrafts.map((draft) => (
+                <div key={draft.id} className="rounded-[10px] border border-[#efe9dc] bg-[#faf8f3] p-[10px]">
+                  <div className="flex items-start gap-[8px]">
+                    <div className="min-w-0 flex-1">
+                      <b className="block text-[13px] text-[#11161d] truncate">{draft.name}</b>
+                      <div className="text-[11.5px] text-[#6b6f76] leading-[1.45]">
+                        {[draft.form.lastName || "No last name", draft.form.rank, draft.form.award, draft.form.billet || "No billet"].join(" • ")}
+                        <br />
+                        {[draft.form.dateFrom || "No start", draft.form.dateTo || "No end"].join(" to ")} • Modified {formatDraftDate(draft.updatedAt)}
+                      </div>
+                    </div>
+                    {activeDraftId === draft.id && <span className="text-[10.5px] font-bold text-[#2f7d44] bg-[#e8f4eb] px-[7px] py-[3px] rounded-full">Open</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-[6px] mt-[9px]">
+                    <button onClick={() => handleOpenSavedDraft(draft.id)} className="text-[11.5px] font-semibold px-[9px] py-[6px] rounded-[7px] bg-white border border-[#dcd6c8] text-[#3a414b]">Open</button>
+                    <button onClick={() => handleRenameDraft(draft.id)} className="text-[11.5px] font-semibold px-[9px] py-[6px] rounded-[7px] bg-white border border-[#dcd6c8] text-[#3a414b]">Rename</button>
+                    <button onClick={() => handleDuplicateDraft(draft.id)} className="text-[11.5px] font-semibold px-[9px] py-[6px] rounded-[7px] bg-white border border-[#dcd6c8] text-[#3a414b]">Duplicate</button>
+                    <button onClick={() => handleDeleteDraft(draft.id)} className="text-[11.5px] font-semibold px-[9px] py-[6px] rounded-[7px] bg-white border border-[#f0b8b3] text-[#b3261e]">Delete</button>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-[12.5px] text-[#6b6f76] bg-[#faf8f3] border border-[#efe9dc] rounded-[9px] p-[10px]">
+                  No saved drafts yet. Save current work to keep multiple awards available in this browser.
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
         {/* ---- SECTION 2: Output ---- */}
-        <section>
+        <section id="outputs" className="scroll-mt-[96px]">
           <div className="bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
             <div className="flex items-center gap-[10px] p-[14px_16px] border-b border-[#dcd6c8]">
               <span className="w-[22px] h-[22px] rounded-[6px] shrink-0 grid place-items-center text-[12px] font-extrabold bg-[#a01722] text-[#e6d29a]">3</span>
@@ -2027,7 +2484,7 @@ ${bodyContent}
               </div>
 
               {/* Citation Output */}
-              <div className="flex items-center gap-[10px] mb-[10px] mt-5">
+              <div id="citation-output" className="scroll-mt-[96px] flex items-center gap-[10px] mb-[10px] mt-5">
                 <h3 className="m-0 text-[14px] text-[#11161d]">Proposed Citation</h3>
                 <div className="ml-auto flex gap-[7px]">
                   <button
@@ -2178,12 +2635,37 @@ ${bodyContent}
         </section>
 
         {/* ---- SECTION 3: Validation ---- */}
-        <aside>
+        <aside id="validation" className="scroll-mt-[96px]">
           <div className="bg-white border border-[#dcd6c8] rounded-[12px] shadow-[0_1px_2px_rgba(17,22,29,.05),0_8px_24px_rgba(17,22,29,.07)]">
             <div className="flex items-center gap-[10px] p-[14px_16px] border-b border-[#dcd6c8]">
               <span className="w-[22px] h-[22px] rounded-[6px] shrink-0 grid place-items-center text-[12px] font-extrabold bg-[#a01722] text-[#e6d29a]">✓</span>
               <h2 className="m-0 text-[13px] uppercase tracking-[.12em] text-[#11161d]">Validation</h2>
             </div>
+
+            {currentAwardMatch.severity !== "none" && (
+              <div
+                className="m-[12px_12px_0] rounded-[10px] border p-[11px_12px] text-[12.5px] leading-[1.45]"
+                style={{
+                  background: currentAwardMatch.severity === "severe" ? "#fef7f6" : "#fdf8f0",
+                  borderColor: currentAwardMatch.severity === "severe" ? "#b3261e" : "#b5751a",
+                  color: currentAwardMatch.severity === "severe" ? "#7c1d13" : "#5b4a13",
+                }}
+              >
+                <b className="block text-[11px] uppercase tracking-[.08em] mb-[4px]">
+                  {currentAwardMatch.title}
+                </b>
+                <span>{currentAwardMatch.detail}</span>
+                <ul className="m-[7px_0_0] pl-[18px]">
+                  {currentAwardMatch.recommendations.map((rec) => <li key={rec}>{rec}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {dateErr && (
+              <div className="m-[12px_12px_0] rounded-[10px] border border-[#b3261e] bg-[#fef7f6] p-[11px_12px] text-[12.5px] font-semibold text-[#7c1d13]">
+                {dateErr}
+              </div>
+            )}
 
             {/* Scores — Compliance + Quality */}
             <div className="p-[14px_16px] border-b border-[#dcd6c8] grid gap-[14px]">
