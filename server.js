@@ -77,7 +77,22 @@ app.post("/api/improve", async (req, res) => {
     closing = "",
     charLimit = 0,
     targetLow = 0,
+    validationFindings = [],
+    awardJustificationFindings = [],
+    realityFindings = [],
   } = req.body || {};
+
+  const reviewContext = [
+    Array.isArray(validationFindings) && validationFindings.length
+      ? ["VALIDATION FINDINGS TO FIX:", ...validationFindings.map((x) => `- ${String(x)}`)].join("\n")
+      : "",
+    Array.isArray(awardJustificationFindings) && awardJustificationFindings.length
+      ? ["AWARD JUSTIFICATION FINDINGS:", ...awardJustificationFindings.map((x) => `- ${String(x)}`)].join("\n")
+      : "",
+    Array.isArray(realityFindings) && realityFindings.length
+      ? ["REALITY CHECK FINDINGS (do not invent facts; preserve questionable claims but make wording professional):", ...realityFindings.map((x) => `- ${String(x)}`)].join("\n")
+      : "",
+  ].filter(Boolean).join("\n\n");
 
   const isUpper = ["NAM", "NMC", "CERTCOM"].includes(award);
   const caseRule = isUpper
@@ -198,6 +213,7 @@ app.post("/api/improve", async (req, res) => {
 
     user = [
       `Award type: ${award}`,
+      reviewContext ? `\n${reviewContext}` : "",
       "",
       "CURRENT LETTER OF AUTHORIZATION (refine wording, transitions, and impact — preserve the same information):",
       soa || "(none)",
@@ -237,6 +253,7 @@ app.post("/api/improve", async (req, res) => {
 
     user = [
       `Award type: ${award}`,
+      reviewContext ? `\n${reviewContext}` : "",
       "",
       "FIXED OPENING (do not change, reproduce exactly at the start of the citation):",
       opening || "(none provided)",

@@ -97,11 +97,11 @@ const RANKS = [
 ] as const;
 
 const AWARDS: Record<AwardKey, AwardConfig> = {
-  NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1100, 1250], closing: "lesser", greatCredit: false, isLOA: false },
-  NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1100, 1250], closing: "lesser", greatCredit: false, isLOA: false },
-  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false },
-  MSM:     { label: "Meritorious Service Medal",              casing: "sentence", maxChars: 0,    target: null,          closing: "great",  greatCredit: true,  isLOA: false },
-  LOM:     { label: "Legion of Merit",                        casing: "sentence", maxChars: 0,    target: null,          closing: "great",  greatCredit: true,  isLOA: false },
+  NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
+  NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
+  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
+  MSM:     { label: "Meritorious Service Medal",              casing: "sentence", maxChars: 1800, target: [1700, 1790], closing: "great",  greatCredit: true,  isLOA: false },
+  LOM:     { label: "Legion of Merit",                        casing: "sentence", maxChars: 1650, target: [1550, 1640], closing: "great",  greatCredit: true,  isLOA: false },
   OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
 };
 
@@ -326,19 +326,20 @@ function analyzeRealityIssues(form: FormState): CheckItem[] {
   const personalRoutine = /\b(fed (my )?cat|cleaned (my )?litter box|walked (my )?dog|washed (my )?car|made (my )?bed|did (my )?laundry|read one book|read a book)\b/i;
   const trivial = /\b(showed up|was on time|did my job|completed daily tasks|answered emails|attended formation)\b/i;
   const hugeClaim = /\b(saved|led|trained|managed|impacted|supported)\s+(?:over\s+|more than\s+)?(?:10,000|10000|[5-9]\d{3,})\s+(marines|sailors|personnel|people|families)\b/i;
+  const absurd = /\b(defeated sharks?|became king of france|ended all wars|personally ended all wars|single[- ]handedly saved the world|invented freedom|meme|skibidi|yeet|sigma|rizz)\b/i;
   const noContext = hugeClaim.test(text) && !/(command-wide|service-wide|installation|multi-year|enterprise|across|throughout|program|initiative)/i.test(text);
 
-  if (personalRoutine.test(text) || trivial.test(text)) {
+  if (personalRoutine.test(text) || trivial.test(text) || absurd.test(text)) {
     checks.push({
       status: "warn",
-      title: "Reality Check",
-      detail: "Input appears to describe routine personal responsibilities rather than award-worthy accomplishments.",
+      title: "Reality Check Triggered",
+      detail: "One or more accomplishments may not be realistic and should be verified.",
     });
   }
   if (noContext) {
     checks.push({
       status: "warn",
-      title: "Reality Check",
+      title: "Reality Check Triggered",
       detail: "Impact claims appear unusually large and may require supporting context.",
     });
   }
@@ -564,7 +565,8 @@ function expandCitationLocally(citation: string, targetLow: number, maxChars: nu
 
 function normalizeWashingtonDC(text: string): string {
   let out = text;
-  out = out.replace(/Washington,?\s*D\.?\s*C\.?/gi, "Washington, D.C.");
+  out = out.replace(/Washington\s*,?\s*D\s*\.?\s*C\.?/gi, "Washington, D.C.");
+  out = out.replace(/Washington,D\.C\./gi, "Washington, D.C.");
   out = out.replace(/Marine Barracks,?\s+Washington,\s*D\.C\./gi, UNIT_CANON);
   out = out.replace(/D\.C\.,\s*,+/gi, "D.C.,");
   out = out.replace(/D\.C\.,\s*\./gi, "D.C.");
@@ -585,6 +587,62 @@ function cleanup(text: string): string {
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function citationSentences(text: string): string[] {
+  return cleanup(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function enforceCitationLimit(text: string, form: FormState): string {
+  const cfg = AWARDS[form.award];
+  if (!cfg.maxChars) return applyCase(cleanup(text), cfg.casing);
+
+  const limit = cfg.maxChars;
+  let out = applyCase(cleanup(text), cfg.casing);
+  if (out.length <= limit) return out;
+
+  const opening = applyCase(cleanup(buildOpening(form)), cfg.casing);
+  const closing = applyCase(cleanup(buildClosing(form)), cfg.casing);
+  const lower = out.toLowerCase();
+  const openingLower = opening.toLowerCase();
+  const closingLower = closing.toLowerCase();
+  let body = out;
+
+  if (lower.startsWith(openingLower)) body = body.slice(opening.length).trim();
+  if (body.toLowerCase().endsWith(closingLower)) body = body.slice(0, -closing.length).trim();
+
+  const ranked = citationSentences(body)
+    .filter((s) => s && s.toLowerCase() !== openingLower && s.toLowerCase() !== closingLower)
+    .map((sentence, index) => ({ sentence, index, score: accomplishmentPriorityScore(sentence, form) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const kept: string[] = [];
+  for (const item of ranked) {
+    const candidate = cleanup([opening, ...kept, item.sentence, closing].join(" "));
+    if (candidate.length <= limit) kept.push(item.sentence);
+  }
+
+  out = cleanup([opening, ...kept, closing].join(" "));
+  if (out.length <= limit) return applyCase(out, cfg.casing);
+
+  const available = Math.max(0, limit - opening.length - closing.length - 2);
+  let compressedBody = kept.join(" ");
+  if (compressedBody.length > available) {
+    compressedBody = compressedBody.slice(0, Math.max(0, available)).replace(/\s+\S*$/, "").trim();
+    if (compressedBody && !/[.!?]$/.test(compressedBody)) compressedBody += ".";
+  }
+  out = cleanup([opening, compressedBody, closing].filter(Boolean).join(" "));
+
+  if (out.length > limit) {
+    const reserved = ` ${closing}`;
+    const openingAndBodyLimit = Math.max(0, limit - reserved.length);
+    out = cleanup(out.slice(0, openingAndBodyLimit).replace(/\s+\S*$/, "") + reserved);
+  }
+
+  return applyCase(out.slice(0, limit), cfg.casing);
 }
 
 function parseServiceDate(value: string): Date | null {
@@ -982,7 +1040,7 @@ function assembleCitation(form: FormState): string {
   text = enforceWashington(text);
   text = cleanup(text);
   text = applyCase(text, cfg.casing);
-  return text;
+  return enforceCitationLimit(text, form);
 }
 
 function runChecks(citation: string, soa: string, form: FormState): CheckItem[] {
@@ -1296,6 +1354,7 @@ export default function Index() {
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiEnhancement, setAiEnhancement] = useState<boolean>(true);
   const [aiNotes, setAiNotes] = useState<string[]>([]);
+  const [aiFixSummary, setAiFixSummary] = useState<{ count: number; details: string[]; open: boolean } | null>(null);
   const [spellMode, setSpellMode] = useState<boolean>(false);
   const [aiBanner, setAiBanner] = useState<{ show: boolean; over: boolean; message: string }>({ show: false, over: false, message: "" });
   const [classifiedAchievements, setClassifiedAchievements] = useState<ClassifiedAchievement[]>([]);
@@ -1305,6 +1364,7 @@ export default function Index() {
   const [showStartupDialog, setShowStartupDialog] = useState<boolean>(false);
   const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>(loadSavedDrafts);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [showCatPopup, setShowCatPopup] = useState<boolean>(false);
   const hasRestored = useRef(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -1315,6 +1375,11 @@ export default function Index() {
   const currentWeakInput = analyzeWeakInput(form);
   const hasHardValidationError = Boolean(dateErr);
   const unitIsPreset = (UNIT_PRESETS as readonly string[]).includes(displayUnit(form.unit));
+  const awardConcernKind = currentAwardMatch.severity === "none"
+    ? "none"
+    : awardLevel(currentAwardMatch.recommendedAward) > awardLevel(form.award)
+      ? "upgrade"
+      : "downgrade";
 
   // Show splash for 3.5s, then check for saved draft
   useEffect(() => {
@@ -1378,6 +1443,7 @@ export default function Index() {
     setCitation("");
     setChecks([]);
     setAiNotes([]);
+    setAiFixSummary(null);
     setClassifiedAchievements([]);
     setQualityScores(null);
     setActiveDraftId(null);
@@ -1394,6 +1460,7 @@ export default function Index() {
     setCitation("");
     setChecks([]);
     setAiNotes([]);
+    setAiFixSummary(null);
     setClassifiedAchievements([]);
     setQualityScores(null);
     setAiBanner({ show: false, over: false, message: "" });
@@ -1436,6 +1503,7 @@ export default function Index() {
     setSoa(draft.soa || "");
     setCitation(draft.citation || "");
     setAiNotes(draft.aiNotes || []);
+    setAiFixSummary(null);
     setChecks(runChecks(draft.citation || "", draft.soa || "", { ...DEFAULT_FORM, ...draft.form }));
     setQualityScores(draft.citation ? scoreQuality(draft.citation, { ...DEFAULT_FORM, ...draft.form }) : null);
     setClassifiedAchievements(classifyAll(achievementLines(draft.form)));
@@ -1482,6 +1550,13 @@ export default function Index() {
     return () => clearTimeout(timer);
   }, [form, soa, citation]);
 
+  useEffect(() => {
+    if (!/\b(cats?|kittens?|litter\s*box|litterbox|fostered cats|fostered kittens)\b/i.test(form.achievements)) return;
+    setShowCatPopup(true);
+    const timer = setTimeout(() => setShowCatPopup(false), 4200);
+    return () => clearTimeout(timer);
+  }, [form.achievements]);
+
   // Keyboard shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1503,6 +1578,77 @@ export default function Index() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "AI request failed");
     return d;
+  }
+
+  function currentFindingSummary() {
+    const validationFindings = checks
+      .filter((check) => check.status !== "ok")
+      .map((check) => `${check.title}: ${check.detail}`);
+    const awardJustificationFindings = [
+      `Award Justification: ${currentAwardMatch.score}%`,
+      currentAwardMatch.detail,
+      ...currentAwardMatch.recommendations,
+    ].filter(Boolean);
+    const realityFindings = checks
+      .filter((check) => /Reality Check/i.test(check.title))
+      .map((check) => check.detail);
+    return { validationFindings, awardJustificationFindings, realityFindings };
+  }
+
+  async function handleFixWithAI() {
+    if (!soa && !citation) {
+      toast.error("Generate an award package first");
+      return;
+    }
+    if (!aiAvailable) {
+      toast.error("AI unavailable. Generate Award Package can still use standard drafting mode.");
+      return;
+    }
+
+    setAiLoading(true);
+    const beforeIssues = checks.filter((check) => check.status !== "ok").length;
+    const findings = currentFindingSummary();
+
+    try {
+      const d = await requestAIImprove({
+        mode: cfg.isLOA ? "loa" : "all",
+        award: form.award,
+        soa,
+        citation: cfg.isLOA ? "" : citation,
+        opening: cfg.isLOA ? "" : applyCase(buildOpening(form), cfg.casing),
+        closing: cfg.isLOA ? "" : applyCase(buildClosing(form), cfg.casing),
+        charLimit: cfg.maxChars || 0,
+        targetLow: cfg.target?.[0] || 0,
+        validationFindings: findings.validationFindings,
+        awardJustificationFindings: findings.awardJustificationFindings,
+        realityFindings: findings.realityFindings,
+      });
+
+      const nextSoa = cleanup(expandAbbr(d.loa || d.soa || soa));
+      const nextCitation = cfg.isLOA ? "" : enforceCitationLimit(expandAbbr(d.citation || citation), form);
+      const nextChecks = runChecks(nextCitation, nextSoa, form);
+      const afterIssues = nextChecks.filter((check) => check.status !== "ok").length;
+      const details = Array.isArray(d.notes)
+        ? d.notes.map((note: unknown) => String(note)).slice(0, 8)
+        : [];
+      const improvementCount = Math.max(1, Math.min(9, details.length || beforeIssues - afterIssues || 1));
+
+      setSoa(nextSoa);
+      setCitation(nextCitation);
+      setChecks(nextChecks);
+      setQualityScores(nextCitation ? scoreQuality(nextCitation, form) : null);
+      setAiNotes(details);
+      setAiFixSummary({
+        count: improvementCount,
+        details: details.length ? details : ["Updated wording, formatting, and validation alignment."],
+        open: false,
+      });
+      toast.success(`AI applied ${improvementCount} improvement${improvementCount === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI request failed");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function handleGenerate() {
@@ -1549,6 +1695,7 @@ export default function Index() {
       setChecks(runChecks("", loa, form));
       setQualityScores(null); // No citation quality score for LOA
       setAiNotes(collectedNotes.slice(0, 8));
+      setAiFixSummary(null);
       if (!aiEnhancement || aiAvailable) setAiBanner({ show: false, over: false, message: "" });
       setAiLoading(false);
       toast.success(aiEnhancement && aiAvailable ? "Award package generated with AI" : "Award package generated");
@@ -1575,7 +1722,7 @@ export default function Index() {
     if (cfg.target && newCitation.length < cfg.target[0] && form.achievements.trim()) {
       const expanded = expandCitationLocally(newCitation, cfg.target[0], cfg.maxChars, form);
       if (expanded.length > newCitation.length) {
-        newCitation = cleanup(applyCase(expanded, cfg.casing));
+        newCitation = enforceCitationLimit(expanded, form);
       }
     }
 
@@ -1590,7 +1737,7 @@ export default function Index() {
           charLimit: cfg.maxChars || 0,
           targetLow: cfg.target?.[0] || 0,
         });
-        newCitation = applyCase(cleanup(enforceWashington(expandAbbr(expanded.citation || newCitation))), cfg.casing);
+        newCitation = enforceCitationLimit(expandAbbr(expanded.citation || newCitation), form);
         if (Array.isArray(expanded.notes)) collectedNotes.push(...expanded.notes.map((n: unknown) => String(n)));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "AI request failed");
@@ -1602,12 +1749,14 @@ export default function Index() {
     setClassifiedAchievements(classifyAll(lines));
 
     // Compute quality score
+    newCitation = enforceCitationLimit(newCitation, form);
     setQualityScores(scoreQuality(newCitation, form));
 
     setSoa(newSoa);
     setCitation(newCitation);
     setChecks(runChecks(newCitation, newSoa, form));
     setAiNotes(collectedNotes.slice(0, 8));
+    setAiFixSummary(null);
     if (!aiEnhancement || aiAvailable) setAiBanner({ show: false, over: false, message: "" });
     setAiLoading(false);
     toast.success(aiEnhancement && aiAvailable ? "Award package generated with AI" : "Award package generated");
@@ -1620,6 +1769,7 @@ export default function Index() {
     setCitation("");
     setChecks([]);
     setAiNotes([]);
+    setAiFixSummary(null);
     setClassifiedAchievements([]);
     setQualityScores(null);
     setAiBanner({ show: false, over: false, message: "" });
@@ -1630,15 +1780,17 @@ export default function Index() {
 
   function handleAutoFix(fixId: string) {
     if (!citation) return;
-    const fixed = autoFixCitation(citation, fixId, cfg.casing);
+    const fixed = enforceCitationLimit(autoFixCitation(citation, fixId, cfg.casing), form);
     setCitation(fixed);
     setChecks(runChecks(fixed, soa, form));
     toast.success("Auto-fix applied");
   }
 
   function handleRevalidate() {
-    setChecks(runChecks(citation, soa, form));
-    setQualityScores(scoreQuality(citation, form));
+    const limited = enforceCitationLimit(citation, form);
+    if (limited !== citation) setCitation(limited);
+    setChecks(runChecks(limited, soa, form));
+    setQualityScores(scoreQuality(limited, form));
   }
 
   function handleCopy(kind: "soa" | "citation") {
@@ -1833,7 +1985,7 @@ ${bodyContent}
     if (!citation) { toast.error("Generate a citation first"); return; }
     if (spellMode) {
       setSpellMode(false);
-      const fixed = applyCase(cleanup(enforceWashington(expandAbbr(citation))), cfg.casing);
+      const fixed = enforceCitationLimit(expandAbbr(citation), form);
       setCitation(fixed);
       setChecks(runChecks(fixed, soa, form));
       toast.success("Spell-check off — re-validated");
@@ -1924,7 +2076,7 @@ ${bodyContent}
       const d = await r.json();
       if (!r.ok) { toast.error(d.error || "AI request failed"); return; }
 
-      let outCite = applyCase(cleanup(enforceWashington(expandAbbr(d.citation || citation))), cfg.casing);
+      let outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
       setCitation(outCite);
       setChecks(runChecks(outCite, soa, form));
       setQualityScores(scoreQuality(outCite, form));
@@ -1984,7 +2136,7 @@ ${bodyContent}
         });
         toast.success("AI refinement applied");
       } else {
-        let outCite = applyCase(cleanup(enforceWashington(expandAbbr(d.citation || citation))), cfg.casing);
+        let outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
         let outSoa = cleanup(expandAbbr(d.soa || soa));
 
         setSoa(outSoa);
@@ -2422,6 +2574,7 @@ ${bodyContent}
                 <label className="block text-[12px] font-semibold text-[#3a414b] mb-[5px]">
                   {cfg.isLOA ? "Volunteer activities & community impact" : "Key actions & impact"}
                 </label>
+                <div className="relative">
                 <textarea
                   rows={7}
                   value={form.achievements}
@@ -2436,6 +2589,20 @@ ${bodyContent}
                   className="w-full text-[14px] text-[#1c222b] bg-[#fcfbf8] border border-[#dcd6c8] rounded-[9px] p-[9px_11px] focus:outline-none focus:border-[#a01722] focus:shadow-[0_0_0_3px_rgba(160,23,34,.12)] focus:bg-white transition-[border-color,box-shadow] duration-150 resize-y leading-[1.5]"
                   style={{ fontFamily: "inherit" }}
                 />
+                {showCatPopup && (
+                  <div className="absolute right-[10px] top-[10px] z-10 rounded-[10px] border border-[#dcd6c8] bg-white px-[10px] py-[7px] text-[12px] font-semibold text-[#3a414b] shadow-[0_8px_22px_rgba(17,22,29,.14)]">
+                    <button
+                      onClick={() => setShowCatPopup(false)}
+                      className="ml-[8px] float-right text-[#6b6f76]"
+                      aria-label="Dismiss"
+                    >
+                      x
+                    </button>
+                    🐱 Meow.
+                    <span className="block font-normal text-[#6b6f76]">This may require additional justification.</span>
+                  </div>
+                )}
+                </div>
                 <div className="text-[11px] text-[#6b6f76] mt-[4px]">
                   {cfg.isLOA
                     ? "These feed the volunteer service narrative in the Letter of Authorization."
@@ -2608,6 +2775,32 @@ ${bodyContent}
               )}
             </div>
             <div className="p-4">
+              {currentAwardMatch.severity !== "none" && (
+                <div
+                  className="rounded-[12px] border p-[13px_15px] mb-4 text-[13px] leading-[1.45]"
+                  style={{
+                    background: awardConcernKind === "upgrade" ? "#eef6ff" : "#fff1f0",
+                    borderColor: awardConcernKind === "upgrade" ? "#6aa9e8" : "#b3261e",
+                    color: awardConcernKind === "upgrade" ? "#173a5e" : "#7c1d13",
+                    boxShadow: awardConcernKind === "upgrade" ? "0 8px 24px rgba(26,77,143,.12)" : "0 8px 24px rgba(179,38,30,.12)",
+                  }}
+                >
+                  <b className="block text-[13px] uppercase tracking-[.1em] mb-[5px]">
+                    {awardConcernKind === "upgrade" ? "⬆ POTENTIAL UPGRADE" : "⚠ AWARD LEVEL CONCERN"}
+                  </b>
+                  <span>
+                    {awardConcernKind === "upgrade"
+                      ? "Accomplishments may justify consideration for a higher award level."
+                      : `Accomplishments currently appear below the typical threshold for ${AWARDS[form.award].label}.`}
+                  </span>
+                  <span className="block mt-[5px] font-semibold">
+                    {awardConcernKind === "upgrade"
+                      ? `Recommended review: ${awardShortLabel(currentAwardMatch.recommendedAward)}.`
+                      : `Recommended award level: ${awardShortLabel(currentAwardMatch.recommendedAward)}.`}
+                  </span>
+                </div>
+              )}
+
               {/* AI banner */}
               {aiBanner.show && (
                 <div
@@ -2743,12 +2936,6 @@ ${bodyContent}
 
               {/* ---- Action buttons (shown for both OVSM and standard awards) ---- */}
               <div className="flex flex-wrap gap-[9px] mt-4">
-                <button
-                  onClick={handleRevalidate}
-                  className="cursor-pointer text-[13.5px] font-semibold px-[15px] py-[10px] rounded-[9px] inline-flex items-center gap-2 bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150 active:translate-y-px"
-                >
-                  Re-run Validation
-                </button>
                 <div className="relative" ref={exportRef}>
                   <button
                     onClick={() => setExportOpen(!exportOpen)}
@@ -2819,6 +3006,35 @@ ${bodyContent}
                 {dateErr}
               </div>
             )}
+
+            <div className="m-[12px_12px_0] rounded-[10px] border border-[#dcd6c8] bg-[#faf8f3] p-[11px_12px]">
+              <button
+                onClick={handleFixWithAI}
+                disabled={!aiAvailable || aiLoading || (!soa && !citation)}
+                className="w-full cursor-pointer text-[13.5px] font-semibold px-[14px] py-[10px] rounded-[9px] inline-flex items-center justify-center gap-2 text-[#3a2e08] transition-transform duration-[.08s] active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: "linear-gradient(160deg, #d8bb63, #c5a44e)",
+                  boxShadow: "0 6px 16px rgba(197,164,78,.24)",
+                }}
+              >
+                {aiLoading ? "Fixing..." : "Fix With AI"}
+              </button>
+              {aiFixSummary && (
+                <div className="mt-[9px] text-[12.5px] text-[#3a414b]">
+                  <button
+                    onClick={() => setAiFixSummary((prev) => prev ? { ...prev, open: !prev.open } : prev)}
+                    className="font-semibold text-[#11161d] underline decoration-[#c5a44e] underline-offset-2"
+                  >
+                    AI applied {aiFixSummary.count} improvement{aiFixSummary.count === 1 ? "" : "s"}
+                  </button>
+                  {aiFixSummary.open && (
+                    <ul className="m-[7px_0_0] pl-[18px] text-[#6b6f76]">
+                      {aiFixSummary.details.map((detail, i) => <li key={i} className="mb-[4px]">{detail}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Scores — Compliance + Quality */}
             <div className="p-[14px_16px] border-b border-[#dcd6c8] grid gap-[14px]">
