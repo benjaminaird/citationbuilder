@@ -77,6 +77,10 @@ app.post("/api/improve", async (req, res) => {
     closing = "",
     charLimit = 0,
     targetLow = 0,
+    primaryBillet = "",
+    additionalBillets = "",
+    achievements = "",
+    metricsToPreserve = [],
     validationFindings = [],
     awardJustificationFindings = [],
     realityFindings = [],
@@ -92,7 +96,28 @@ app.post("/api/improve", async (req, res) => {
     Array.isArray(realityFindings) && realityFindings.length
       ? ["REALITY CHECK FINDINGS (do not invent facts; preserve questionable claims but make wording professional):", ...realityFindings.map((x) => `- ${String(x)}`)].join("\n")
       : "",
+    primaryBillet || additionalBillets
+      ? [
+          "DUTY CONTEXT:",
+          primaryBillet ? `- Primary billet: ${String(primaryBillet)}` : "",
+          additionalBillets ? `- Additional billets/collateral duties: ${String(additionalBillets)}` : "",
+          "- Do not force additional billets into the citation opening sentence. Use them in the body only when relevant to the accomplishments.",
+        ].filter(Boolean).join("\n")
+      : "",
+    Array.isArray(metricsToPreserve) && metricsToPreserve.length
+      ? ["QUANTITATIVE IMPACT TO PRESERVE WHENEVER POSSIBLE:", ...metricsToPreserve.map((x) => `- ${String(x)}`)].join("\n")
+      : "",
+    achievements
+      ? ["ORIGINAL ACCOMPLISHMENTS FOR FACT CHECKING:", String(achievements)].join("\n")
+      : "",
   ].filter(Boolean).join("\n\n");
+
+  const metricRule = [
+    "- Preserve quantitative impact whenever possible, including personnel counts, dollars, percentages, events, ceremonies, duration, volunteer hours, beneficiaries, Defense Travel System authorizations and vouchers, travel claims, inspections, and training events.",
+    "- If the citation must be shortened, remove generic adjectives, filler phrases, and the weakest accomplishments before removing numbers or measurable impact.",
+    "- Group related accomplishments by duty or topic so the citation and Summary of Action do not bounce between unrelated subjects.",
+    "- Prioritize major leadership, quantified impact, duration, personnel, money or resources, command advisory, readiness, ceremonial or operational or community impact, and place routine professional development last.",
+  ].join("\n");
 
   const isUpper = ["NAM", "NMC", "CERTCOM"].includes(award);
   const caseRule = isUpper
@@ -116,6 +141,7 @@ app.post("/api/improve", async (req, res) => {
       "- You may ONLY improve the wording, transitions, impact statements, and military writing style of the SOA body.",
       "- You MUST NOT change the structure: keep Background, Accomplishments, and Recommendation sections.",
       "- Do NOT invent or add facts, numbers, awards, events, outcomes, units, or personnel names.",
+      metricRule,
       "- Do NOT alter dates, rank, EDIPI, names, billet, or unit names.",
       "- Do NOT introduce ANY abbreviations. Spell everything out.",
       '- The only permitted abbreviation is "Washington, D.C." Always write the unit exactly as "Marine Barracks, Washington, D.C.,".',
@@ -128,6 +154,7 @@ app.post("/api/improve", async (req, res) => {
 
     user = [
       `Award type: ${award}`,
+      reviewContext ? `\n${reviewContext}` : "",
       "",
       "CURRENT SUMMARY OF ACTION (refine wording, transitions, and impact — preserve the same information):",
       soa || "(none)",
@@ -155,6 +182,7 @@ app.post("/api/improve", async (req, res) => {
       "- You MUST NOT change the closing sentence. It is provided and is fixed.",
       "- " + caseRule,
       "- Do NOT invent or add facts, numbers, awards, events, outcomes, units, or personnel names.",
+      metricRule,
       "- Do NOT alter dates, rank, EDIPI, names, billet, or unit names.",
       "- Do NOT introduce ANY abbreviations. Spell everything out.",
       '- The only permitted abbreviation is "Washington, D.C." Always write the unit exactly as "Marine Barracks, Washington, D.C.,".',
@@ -176,6 +204,7 @@ app.post("/api/improve", async (req, res) => {
 
     user = [
       `Award type: ${award}`,
+      reviewContext ? `\n${reviewContext}` : "",
       "",
       "FIXED OPENING (do not change, reproduce exactly at the start of the citation):",
       opening || "(none provided)",
@@ -201,6 +230,7 @@ app.post("/api/improve", async (req, res) => {
       "- You may ONLY improve the wording, transitions, impact statements, and military writing style of the LOA body.",
       "- You MUST NOT change the structure: keep the header, identification, volunteer narrative, impact, and recommendation sections.",
       "- Do NOT invent or add facts, numbers, awards, events, outcomes, units, hours volunteered, or organization names.",
+      metricRule,
       "- Do NOT alter dates, rank, EDIPI, names, billet, or unit names.",
       "- Do NOT introduce ANY abbreviations. Spell everything out.",
       '- The only permitted abbreviation is "Washington, D.C." Always write the unit exactly as "Marine Barracks, Washington, D.C.,".',
@@ -237,6 +267,7 @@ app.post("/api/improve", async (req, res) => {
       "- You MUST NOT change the closing sentence. It is provided and is fixed.",
       "- " + caseRule,
       "- Do NOT invent or add facts, numbers, awards, events, or outcomes.",
+      metricRule,
       "- Do NOT alter dates, rank, EDIPI, names, billet, or unit names.",
       "- Do NOT introduce ANY abbreviations. Spell everything out.",
       '- The only permitted abbreviation is "Washington, D.C." Always write the unit exactly as "Marine Barracks, Washington, D.C.,".',

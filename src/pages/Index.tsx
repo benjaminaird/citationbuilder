@@ -30,6 +30,7 @@ interface FormState {
   edipi: string;
   pronoun: PronounKey;
   billet: string;
+  additionalBillets: string;
   unit: string;
   dateFrom: string;
   dateTo: string;
@@ -207,7 +208,7 @@ function classifyAll(lines: string[]): ClassifiedAchievement[] {
 const STRONG_VERBS = /\b(led|spearheaded|orchestrated|directed|championed|galvanized|transformed|revitalized|modernized|overhauled|pioneered|executed|coordinated|mentored|cultivated|engineered|fortified|streamlined|optimized|accelerated|catapulted)\b/i;
 const LEADERSHIP_TERMS = /\b(leadership|initiative|judgment|responsibility|accountability|stewardship|guidance|mentorship|example|standard)\b/i;
 const RESULT_TERMS = /\b(resulted in|yielded|achieved|attained|produced|generated|delivered|improved|increased|reduced|eliminated|exceeded|surpassed|enhanced)\b/i;
-const QUANTIFIABLE = /\b(\d+\s*(percent|%|Marines?|Sailors?|personnel|events?|hours?|days?|weeks?|months?|dollars?|\$))\b|\b(zero|no)\s+(discrepanc|error|failure|incident|loss)/i;
+const QUANTIFIABLE = /\b(\d+\s*(percent|%|Marines?|Sailors?|personnel|service members?|members|events?|ceremonies?|inspections?|trainings?|hours?|days?|weeks?|months?|years?|beneficiaries|profiles?|authorizations?|vouchers?|claims?|dollars?|\$))\b|\$\s?\d+|\b(zero|no)\s+(discrepanc|error|failure|incident|loss)/i;
 
 const SCOPE_TERMS = {
   individual: /\b(individual|personally|single|shop|desk|task)\b/i,
@@ -219,6 +220,13 @@ const SCOPE_TERMS = {
 
 function achievementLines(form: FormState): string[] {
   return form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+function metricsToPreserve(form: FormState): string[] {
+  const metricContext = /\b\d+\s*(?:percent|%|marines?|sailors?|personnel|service members?|members|events?|ceremonies?|inspections?|trainings?|hours?|days?|weeks?|months?|years?|beneficiaries|profiles?|authorizations?|vouchers?|claims?)\b|\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\s*(?:dollars?|volunteer hours?)\b|\b(?:defense travel system|dts|travel claims?|authorizations?|vouchers?|profiles?|commander advisory|advised the commander)\b/i;
+  return achievementLines(form)
+    .filter((line) => metricContext.test(line))
+    .slice(0, 12);
 }
 
 function countMatches(text: string, re: RegExp): number {
@@ -378,16 +386,110 @@ function analyzeOVSMIssues(form: FormState): CheckItem[] {
   return checks;
 }
 
+type AchievementTopic =
+  | "leadership"
+  | "police"
+  | "administration"
+  | "operations"
+  | "training"
+  | "ceremonial"
+  | "community"
+  | "professionalDevelopment"
+  | "other";
+
+function additionalBilletList(form: FormState): string[] {
+  return form.additionalBillets
+    .split(/[;,/]+|\band\b/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function hasDutyWord(line: string, duty: string): boolean {
+  const words = duty.toLowerCase().match(/[a-z0-9]+/g) || [];
+  if (!words.length) return false;
+  const text = line.toLowerCase();
+  return words.some((word) => word.length > 3 && new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text));
+}
+
+function achievementTopic(line: string, form: FormState): AchievementTopic {
+  const text = line.toLowerCase();
+  if (/\b(?:defense travel system|dts|travel|voucher|authorization|profile|claim|administrative|admin|orders|roster|report|records?|pay|personnel action)\b/i.test(text)) {
+    return "administration";
+  }
+  if (/\b(?:police|sergeant|patrol|security|law enforcement|call|response|watch|post|area supervisor)\b/i.test(text)) {
+    return "police";
+  }
+  if (/\b(?:funeral|ceremon|bugler|color guard|parade|honors|memorial)\b/i.test(text)) {
+    return "ceremonial";
+  }
+  if (/\b(?:train|training|instruct|course|class|qualification|professional development)\b/i.test(text)) {
+    return /professional development|read one book|completed course/i.test(text) ? "professionalDevelopment" : "training";
+  }
+  if (/\b(?:volunteer|community|families|youth|veterans|charity|nonprofit|beneficiaries)\b/i.test(text)) {
+    return "community";
+  }
+  if (/\b(?:led|supervised|managed|mentored|advised|briefed|commander|commanding officer|marines?|sailors?|personnel)\b/i.test(text)) {
+    return "leadership";
+  }
+  if (/\b(?:mission|readiness|operation|inspection|deployment|maintenance|logistics|resources?)\b/i.test(text)) {
+    return "operations";
+  }
+  const dutyHints = [form.billet, ...additionalBilletList(form)].filter(Boolean);
+  if (dutyHints.some((duty) => hasDutyWord(line, duty))) return "operations";
+  return "other";
+}
+
+function groupedAchievementLines(form: FormState, lines: string[], forCitation: boolean): string[] {
+  const groups = new Map<AchievementTopic, { line: string; index: number; score: number }[]>();
+  lines.forEach((line, index) => {
+    const topic = achievementTopic(line, form);
+    if (!groups.has(topic)) groups.set(topic, []);
+    groups.get(topic)!.push({ line, index, score: accomplishmentPriorityScore(line, form) });
+  });
+
+  const topicBase: Record<AchievementTopic, number> = {
+    leadership: 95,
+    police: 88,
+    administration: 84,
+    operations: 80,
+    training: 64,
+    ceremonial: 60,
+    community: 56,
+    professionalDevelopment: 25,
+    other: 35,
+  };
+
+  const orderedTopics = Array.from(groups.keys()).sort((a, b) => {
+    if (forCitation) {
+      const aScore = Math.max(...groups.get(a)!.map((item) => item.score)) + topicBase[a];
+      const bScore = Math.max(...groups.get(b)!.map((item) => item.score)) + topicBase[b];
+      return bScore - aScore;
+    }
+    const aFirst = Math.min(...groups.get(a)!.map((item) => item.index));
+    const bFirst = Math.min(...groups.get(b)!.map((item) => item.index));
+    return aFirst - bFirst;
+  });
+
+  return orderedTopics.flatMap((topic) => groups.get(topic)!.sort((a, b) => {
+    if (forCitation) return b.score - a.score || a.index - b.index;
+    return a.index - b.index;
+  }).map((item) => item.line));
+}
+
 function accomplishmentPriorityScore(line: string, form: FormState): number {
-  const text = `${line} ${form.billet}`;
+  const text = `${line} ${form.billet} ${form.additionalBillets}`;
   let score = 0;
   score += countMatches(text, QUANTIFIABLE) * 18;
   score += countMatches(text, STRONG_VERBS) * 12;
   score += countMatches(text, LEADERSHIP_TERMS) * 12;
   score += countMatches(text, RESULT_TERMS) * 14;
+  if (/\b\d+\s*(marines?|sailors?|personnel|service members?|members|civilians|beneficiaries|profiles?|authorizations?|vouchers?|claims?|events?|ceremonies?|inspections?|trainings?|hours?|months?|years?)\b/i.test(text)) score += 22;
+  if (/\$\s?\d|(?:dollars?|funds?|budget|resources?|claims?)/i.test(text)) score += 18;
+  if (/\b(?:defense travel system|dts|travel|voucher|authorization|profile|claim)\b/i.test(text)) score += 18;
+  if (/\b(?:advised|briefed|counseled|recommended|informed)\b.*\b(?:commander|commanding officer|senior enlisted|leadership)\b/i.test(text)) score += 18;
   score += scopeLevel(text) * 10;
   if (/(mission|readiness|operational|ceremonial|inspection|deployment|training|command)/i.test(text)) score += 12;
-  if (/(read one book|fed my cat|litter box|showed up|did my job)/i.test(text)) score -= 40;
+  if (/(read one book|professional development|completed course|fed my cat|litter box|showed up|did my job)/i.test(text)) score -= 28;
   if (form.award === "LOM" || form.award === "MSM") {
     if (/(command-wide|institutional|sustained|program|enterprise|organization|led|supervised|managed)/i.test(text)) score += 15;
   }
@@ -399,12 +501,17 @@ function accomplishmentPriorityScore(line: string, form: FormState): number {
 
 function prioritizedAchievementLines(form: FormState, forCitation: boolean): string[] {
   const lines = achievementLines(form);
-  if (!forCitation) return lines;
+  if (!forCitation) return groupedAchievementLines(form, lines, false);
   const ranked = lines
     .map((line, index) => ({ line, index, score: accomplishmentPriorityScore(line, form) }))
     .sort((a, b) => b.score - a.score || a.index - b.index);
-  const limit = AWARDS[form.award].maxChars ? 3 : 5;
-  return ranked.slice(0, Math.max(1, Math.min(limit, ranked.length))).map((item) => item.line);
+  const cfg = AWARDS[form.award];
+  const limit = cfg.maxChars ? (cfg.maxChars <= 1250 ? 6 : 8) : 8;
+  return groupedAchievementLines(
+    form,
+    ranked.slice(0, Math.max(1, Math.min(limit, ranked.length))).map((item) => item.line),
+    true,
+  );
 }
 
 function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
@@ -421,8 +528,9 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
     };
   }
   const rank = rankSeniority(form.rank);
-  const billet = billetScope(form.billet);
-  const scope = scopeLevel(`${form.billet} ${text}`);
+  const dutyText = `${form.billet} ${form.additionalBillets}`;
+  const billet = billetScope(dutyText);
+  const scope = scopeLevel(`${dutyText} ${text}`);
   const quant = Math.min(4, countMatches(text, QUANTIFIABLE));
   const leadership = Math.min(4, countMatches(text, STRONG_VERBS) + countMatches(text, LEADERSHIP_TERMS));
   const results = Math.min(4, countMatches(text, RESULT_TERMS));
@@ -801,12 +909,13 @@ function buildSOA(form: FormState): string {
   const p = PRONOUNS[form.pronoun];
   const rl = rankLast(form);
   const billet = form.billet || "[Billet]";
+  const additionalBillets = additionalBilletList(form).join("; ");
   const from = form.dateFrom || "[Month Year]";
   const to = form.dateTo || "[Month Year]";
   const awardLabel = AWARDS[form.award].label;
   const unit = unitInSentence(form.unit);
 
-  const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = prioritizedAchievementLines(form, false);
   const classified = classifyAll(lines);
 
   // ---- 1. BACKGROUND PARAGRAPH ----
@@ -820,6 +929,9 @@ function buildSOA(form: FormState): string {
       `Marines assigned to the National Capital Region. ${heShe} performed ${p.poss} duties with ` +
       `initiative and sound judgment, earning the respect and confidence of seniors, peers, ` +
       `and subordinates alike.`,
+    additionalBillets
+      ? `${heShe} also assumed additional duties as ${additionalBillets}, extending ${p.poss} influence across multiple mission areas while maintaining excellence in ${p.poss} primary billet.`
+      : "",
   ].join(" ");
 
   // ---- 2. ACCOMPLISHMENTS SECTION (grouped by theme) ----
@@ -902,12 +1014,13 @@ function buildLOA(form: FormState): string {
   const rl = rankLast(form);
   const p = PRONOUNS[form.pronoun];
   const billet = form.billet || "[Billet]";
+  const additionalBillets = additionalBilletList(form).join("; ");
   const from = form.dateFrom || "[Date]";
   const to = form.dateTo || "[Date]";
   const unit = displayUnit(form.unit);
   const heShe = p.subj.charAt(0).toUpperCase() + p.subj.slice(1);
 
-  const lines = form.achievements.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = prioritizedAchievementLines(form, false);
   const classified = classifyAll(lines);
 
   // ---- 1. HEADER - Marine identification ----
@@ -931,6 +1044,7 @@ function buildLOA(form: FormState): string {
   if (classified.length > 0) {
     serviceParagraphs.push(
       `${rl} dedicated ${p.poss} personal time while serving as ${billet} at ${unit}` +
+      `${additionalBillets ? ` and while carrying additional duties as ${additionalBillets}` : ""}` +
       ` to the following volunteer activities:`
     );
 
@@ -1230,6 +1344,7 @@ const DEFAULT_FORM: FormState = {
   edipi: "",
   pronoun: "m",
   billet: "",
+  additionalBillets: "",
   unit: UNIT_CANON.replace(/,$/, ""),
   dateFrom: "",
   dateTo: "",
@@ -1591,6 +1706,15 @@ export default function Index() {
     return d;
   }
 
+  function aiContextPayload() {
+    return {
+      primaryBillet: form.billet,
+      additionalBillets: form.additionalBillets,
+      achievements: form.achievements,
+      metricsToPreserve: metricsToPreserve(form),
+    };
+  }
+
   function currentFindingSummary() {
     const validationFindings = checks
       .filter((check) => check.status !== "ok")
@@ -1630,6 +1754,7 @@ export default function Index() {
         closing: cfg.isLOA ? "" : applyCase(buildClosing(form), cfg.casing),
         charLimit: cfg.maxChars || 0,
         targetLow: cfg.target?.[0] || 0,
+        ...aiContextPayload(),
         validationFindings: findings.validationFindings,
         awardJustificationFindings: findings.awardJustificationFindings,
         realityFindings: findings.realityFindings,
@@ -1686,7 +1811,7 @@ export default function Index() {
 
       if (aiEnhancement && aiAvailable) {
         try {
-          const improved = await requestAIImprove({ mode: "loa", award: form.award, soa: loa });
+          const improved = await requestAIImprove({ mode: "loa", award: form.award, soa: loa, ...aiContextPayload() });
           loa = cleanup(expandAbbr(improved.loa || loa));
           if (Array.isArray(improved.notes)) collectedNotes.push(...improved.notes.map((n: unknown) => String(n)));
         } catch (err) {
@@ -1716,7 +1841,7 @@ export default function Index() {
     let newSoa = cleanup(buildSOA(form));
     if (aiEnhancement && aiAvailable) {
       try {
-        const improved = await requestAIImprove({ mode: "soa", award: form.award, soa: newSoa });
+        const improved = await requestAIImprove({ mode: "soa", award: form.award, soa: newSoa, ...aiContextPayload() });
         newSoa = cleanup(expandAbbr(improved.soa || newSoa));
         if (Array.isArray(improved.notes)) collectedNotes.push(...improved.notes.map((n: unknown) => String(n)));
       } catch (err) {
@@ -1747,6 +1872,7 @@ export default function Index() {
           closing: applyCase(buildClosing(form), cfg.casing),
           charLimit: cfg.maxChars || 0,
           targetLow: cfg.target?.[0] || 0,
+          ...aiContextPayload(),
         });
         newCitation = enforceCitationLimit(expandAbbr(expanded.citation || newCitation), form);
         if (Array.isArray(expanded.notes)) collectedNotes.push(...expanded.notes.map((n: unknown) => String(n)));
@@ -1831,7 +1957,7 @@ export default function Index() {
     const fileName = `${form.lastName || "Draft"}_${awardKey}`;
     const isLOA = cfg.isLOA;
 
-    const children: any[] = [
+    const children: Paragraph[] = [
       new Paragraph({
         children: [
           new TextRun({ text: `EDIPI: ${form.edipi || "[EDIPI]"}`, bold: true, font: "Times New Roman", size: 22 }),
@@ -2017,6 +2143,7 @@ ${bodyContent}
           mode: "soa",
           award: form.award,
           soa,
+          ...aiContextPayload(),
         }),
       });
       const d = await r.json();
@@ -2047,6 +2174,7 @@ ${bodyContent}
           mode: "loa",
           award: form.award,
           soa,
+          ...aiContextPayload(),
         }),
       });
       const d = await r.json();
@@ -2082,12 +2210,13 @@ ${bodyContent}
           closing: applyCase(buildClosing(form), cfg.casing),
           charLimit: cfg.maxChars || 1500,
           targetLow: cfg.target?.[0] || 1100,
+          ...aiContextPayload(),
         }),
       });
       const d = await r.json();
       if (!r.ok) { toast.error(d.error || "AI request failed"); return; }
 
-      let outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
+      const outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
       setCitation(outCite);
       setChecks(runChecks(outCite, soa, form));
       setQualityScores(scoreQuality(outCite, form));
@@ -2127,6 +2256,8 @@ ${bodyContent}
           opening: cfg.isLOA ? "" : applyCase(buildOpening(form), cfg.casing),
           closing: cfg.isLOA ? "" : applyCase(buildClosing(form), cfg.casing),
           charLimit: cfg.maxChars || 0,
+          targetLow: cfg.target?.[0] || 0,
+          ...aiContextPayload(),
         }),
       });
       const d = await r.json();
@@ -2147,8 +2278,8 @@ ${bodyContent}
         });
         toast.success("AI refinement applied");
       } else {
-        let outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
-        let outSoa = cleanup(expandAbbr(d.soa || soa));
+        const outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
+        const outSoa = cleanup(expandAbbr(d.soa || soa));
 
         setSoa(outSoa);
         setCitation(outCite);
@@ -2470,6 +2601,22 @@ ${bodyContent}
                   style={{ fontFamily: "inherit" }}
                 />
                 <div className="text-[11px] text-[#6b6f76] mt-[4px]">Spell out fully — no abbreviations.</div>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-semibold text-[#3a414b] mb-[5px]">
+                  Additional Billets / Collateral Duties
+                </label>
+                <input
+                  type="text"
+                  value={form.additionalBillets}
+                  onChange={(e) => updateForm({ additionalBillets: e.target.value })}
+                  placeholder="Acting Company Administrative Chief; Funeral Bugler"
+                  autoComplete="off"
+                  className="w-full text-[14px] text-[#1c222b] bg-[#fcfbf8] border border-[#dcd6c8] rounded-[9px] p-[9px_11px] focus:outline-none focus:border-[#a01722] focus:shadow-[0_0_0_3px_rgba(160,23,34,.12)] focus:bg-white transition-[border-color,box-shadow] duration-150"
+                  style={{ fontFamily: "inherit" }}
+                />
+                <div className="text-[11px] text-[#6b6f76] mt-[4px]">Optional. Used in the body when relevant.</div>
               </div>
 
               {/* Unit */}
