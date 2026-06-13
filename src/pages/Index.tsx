@@ -100,7 +100,7 @@ const RANKS = [
 
 const AWARDS: Record<AwardKey, AwardConfig> = {
   MMAST:   { label: "Meritorious Mast",                       casing: "sentence", maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
-  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
+  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
   OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
   NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
   NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
