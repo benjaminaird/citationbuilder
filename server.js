@@ -119,6 +119,7 @@ app.post("/api/improve", async (req, res) => {
     "- Prioritize major leadership, quantified impact, duration, personnel, money or resources, command advisory, readiness, ceremonial or operational or community impact, and place routine professional development last.",
     "- When facts support it, retain public visibility and scope indicators such as national, international, diplomatic, presidential, state ceremony, senior military or civilian leader, battalion-wide, command-wide, and installation-wide impact.",
     "- Keep the award-specific citation frame: opening sentence first, accomplishment body second, standard credit/traditions closing last.",
+    "- For Meritorious Mast, treat the output as a citation/certificate only; do not create or require a Summary of Action.",
   ].join("\n");
 
   const isUpper = ["NAM", "NMC", "CERTCOM"].includes(award);

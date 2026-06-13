@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
    ================================================================ */
 
 // ---- Types ----
-type AwardKey = "NAM" | "NMC" | "CERTCOM" | "MSM" | "LOM" | "OVSM";
+type AwardKey = "MMAST" | "CERTCOM" | "OVSM" | "NAM" | "NMC" | "MSM" | "LOM";
 type PronounKey = "m" | "f";
 
 interface AwardConfig {
@@ -20,6 +20,7 @@ interface AwardConfig {
   closing: "lesser" | "great" | "loa";
   greatCredit: boolean;
   isLOA: boolean;
+  citationOnly?: boolean;
 }
 
 interface FormState {
@@ -98,12 +99,13 @@ const RANKS = [
 ] as const;
 
 const AWARDS: Record<AwardKey, AwardConfig> = {
+  MMAST:   { label: "Meritorious Mast",                       casing: "sentence", maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
+  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
+  OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
   NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
   NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
-  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
   MSM:     { label: "Meritorious Service Medal",              casing: "sentence", maxChars: 1800, target: [1700, 1790], closing: "great",  greatCredit: true,  isLOA: false },
   LOM:     { label: "Legion of Merit",                        casing: "sentence", maxChars: 1650, target: [1550, 1640], closing: "great",  greatCredit: true,  isLOA: false },
-  OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
 };
 
 const PRONOUNS: Record<PronounKey, { subj: string; obj: string; poss: string; refl: string }> = {
@@ -247,7 +249,7 @@ function rankSeniority(rank: string): number {
 }
 
 function awardLevel(award: AwardKey): number {
-  if (award === "CERTCOM") return 0;
+  if (award === "MMAST" || award === "CERTCOM") return 0;
   if (award === "NAM" || award === "OVSM") return 1;
   if (award === "NMC") return 2;
   if (award === "MSM") return 3;
@@ -274,6 +276,7 @@ function scopeLevel(text: string): number {
 }
 
 function recommendedAwardFromSupport(support: number): AwardKey {
+  if (support <= 0) return "MMAST";
   if (support <= 1) return "NAM";
   if (support === 2) return "NMC";
   if (support === 3) return "MSM";
@@ -281,6 +284,7 @@ function recommendedAwardFromSupport(support: number): AwardKey {
 }
 
 function awardShortLabel(award: AwardKey): string {
+  if (award === "MMAST") return "Meritorious Mast";
   if (award === "NMC") return "Navy and Marine Corps Commendation Medal";
   return AWARDS[award].label;
 }
@@ -821,6 +825,8 @@ function buildOpening(form: FormState): string {
   const unit = unitInSentence(form.unit);
 
   switch (form.award) {
+    case "MMAST":
+      return `I commend you for professional excellence and superior achievement while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "NAM":
       return `Professional achievement in the superior performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "NMC":
@@ -1788,7 +1794,7 @@ export default function Index() {
       const d = await requestAIImprove({
         mode: cfg.isLOA ? "loa" : "all",
         award: form.award,
-        soa,
+        soa: cfg.citationOnly ? "" : soa,
         citation: cfg.isLOA ? "" : citation,
         opening: cfg.isLOA ? "" : applyCase(buildOpening(form), cfg.casing),
         closing: cfg.isLOA ? "" : applyCase(buildClosing(form), cfg.casing),
@@ -1800,7 +1806,7 @@ export default function Index() {
         realityFindings: findings.realityFindings,
       });
 
-      const nextSoa = cleanup(expandAbbr(d.loa || d.soa || soa));
+      const nextSoa = cfg.citationOnly ? "" : cleanup(expandAbbr(d.loa || d.soa || soa));
       const nextCitation = cfg.isLOA ? "" : enforceCitationLimit(expandAbbr(d.citation || citation), form);
       const nextChecks = runChecks(nextCitation, nextSoa, form);
       const afterIssues = nextChecks.filter((check) => check.status !== "ok").length;
@@ -1878,8 +1884,8 @@ export default function Index() {
       return;
     }
 
-    let newSoa = cleanup(buildSOA(form));
-    if (aiEnhancement && aiAvailable) {
+    let newSoa = cfg.citationOnly ? "" : cleanup(buildSOA(form));
+    if (!cfg.citationOnly && aiEnhancement && aiAvailable) {
       try {
         const improved = await requestAIImprove({ mode: "soa", award: form.award, soa: newSoa, ...aiContextPayload() });
         newSoa = cleanup(expandAbbr(improved.soa || newSoa));
@@ -1887,7 +1893,7 @@ export default function Index() {
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "AI request failed");
       }
-    } else if (aiEnhancement && !aiAvailable) {
+    } else if (!cfg.citationOnly && aiEnhancement && !aiAvailable) {
       setAiBanner({ show: true, over: false, message: "AI unavailable. Using standard drafting mode." });
       toast.info("AI unavailable. Using standard drafting mode.");
     }
@@ -1996,6 +2002,7 @@ export default function Index() {
     const awardKey = form.award;
     const fileName = `${form.lastName || "Draft"}_${awardKey}`;
     const isLOA = cfg.isLOA;
+    const isCitationOnly = Boolean(cfg.citationOnly);
 
     const children: Paragraph[] = [
       new Paragraph({
@@ -2036,6 +2043,20 @@ export default function Index() {
             spacing: { after: 120 },
           })
         ) : [new Paragraph({ children: [new TextRun({ text: "(No LOA generated)", font: "Times New Roman", size: 22, italics: true })] })])
+      );
+    } else if (isCitationOnly) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: "CITATION", bold: true, font: "Times New Roman", size: 24 })],
+          heading: HeadingLevel.HEADING_2,
+          spacing: { after: 120 },
+        }),
+        ...(citation ? citation.match(/.{1,500}(?:\. |$)/g)?.map((chunk: string) =>
+          new Paragraph({
+            children: [new TextRun({ text: chunk.trim(), font: "Times New Roman", size: 22 })],
+            spacing: { after: 120 },
+          })
+        ) || [] : [new Paragraph({ children: [new TextRun({ text: "(No citation generated)", font: "Times New Roman", size: 22, italics: true })] })])
       );
     } else {
       // Standard: SOA + Citation
@@ -2101,6 +2122,7 @@ export default function Index() {
     const awardKey = form.award;
     const fileName = `${form.lastName || "Draft"}_${awardKey}`;
     const isLOA = cfg.isLOA;
+    const isCitationOnly = Boolean(cfg.citationOnly);
 
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -2108,6 +2130,9 @@ export default function Index() {
     if (isLOA) {
       const loaParas = soa ? soa.split("\n\n").filter(Boolean).map((p) => `<p>${esc(p.trim())}</p>`).join("\n") : "<p><em>(No LOA generated)</em></p>";
       bodyContent = `<h2>LETTER OF AUTHORIZATION</h2>\n${loaParas}`;
+    } else if (isCitationOnly) {
+      const citeText = citation ? `<p>${esc(citation)}</p>` : "<p><em>(No citation generated)</em></p>";
+      bodyContent = `<h2>CITATION</h2>\n${citeText}`;
     } else {
       const soaParas = soa ? soa.split("\n\n").filter(Boolean).map((p) => `<p>${esc(p.trim())}</p>`).join("\n") : "<p><em>(No SOA generated)</em></p>";
       const citeText = citation ? `<p>${esc(citation)}</p>` : "<p><em>(No citation generated)</em></p>";
@@ -2484,7 +2509,7 @@ ${bodyContent}
           {[
             ["details", "Details"],
             ["accomplishments", "Accomplishments"],
-            ["outputs", cfg.isLOA ? "LOA" : "SOA"],
+            ["outputs", cfg.isLOA ? "LOA" : cfg.citationOnly ? "Citation" : "SOA"],
             ["citation-output", cfg.isLOA ? "Validation" : "Citation"],
             ["validation", "Validation"],
           ].map(([id, label]) => (
@@ -2519,16 +2544,19 @@ ${bodyContent}
                   className="w-full text-[14px] text-[#1c222b] bg-[#fcfbf8] border border-[#dcd6c8] rounded-[9px] p-[9px_11px] focus:outline-none focus:border-[#a01722] focus:shadow-[0_0_0_3px_rgba(160,23,34,.12)] focus:bg-white transition-[border-color,box-shadow] duration-150"
                   style={{ fontFamily: "inherit" }}
                 >
-                  <option value="NAM">Navy & Marine Corps Achievement Medal (NAM)</option>
-                  <option value="NMC">Navy & Marine Corps Commendation Medal (NMC)</option>
+                  <option value="MMAST">Meritorious Mast</option>
                   <option value="CERTCOM">Certificate of Commendation (CertCom)</option>
+                  <option value="OVSM">Outstanding Volunteer Service Medal (OVSM)</option>
+                  <option value="NAM">Navy & Marine Corps Achievement Medal (NAM)</option>
+                  <option value="NMC">Navy & Marine Corps Commendation Medal (NAVCOM)</option>
                   <option value="MSM">Meritorious Service Medal (MSM)</option>
                   <option value="LOM">Legion of Merit (LOM)</option>
-                  <option value="OVSM">Outstanding Volunteer Service Medal (OVSM)</option>
                 </select>
                 <div className="text-[11px] text-[#6b6f76] mt-[4px]">
                   {cfg.isLOA
                     ? "Generates a Letter of Authorization instead of a citation."
+                    : cfg.citationOnly
+                      ? "Generates a citation/certificate only."
                     : cfg.casing === "upper"
                       ? "Citation renders in ALL CAPS."
                       : "Citation renders in sentence case."}
@@ -3037,6 +3065,52 @@ ${bodyContent}
                     style={{ fontFamily: '"Iowan Old Style", "Palatino Linotype", Georgia, serif' }}
                   >
                     {soa || <span className="text-[#6b6f76] italic" style={{ fontFamily: "inherit" }}>Your Letter of Authorization will appear here.</span>}
+                  </div>
+                </>
+              ) : cfg.citationOnly ? (
+                <>
+                  <div id="citation-output" className="scroll-mt-[96px] flex items-center gap-[10px] mb-[10px]">
+                    <h3 className="m-0 text-[14px] text-[#11161d]">Proposed Citation</h3>
+                    <div className="ml-auto flex gap-[7px]">
+                      <button
+                        onClick={handleToggleSpell}
+                        className={`cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] transition-colors ${
+                          spellMode
+                            ? "text-[#3a2e08] border-none"
+                            : "bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722]"
+                        }`}
+                        style={spellMode ? { background: "linear-gradient(160deg, #d8bb63, #c5a44e)" } : undefined}
+                      >
+                        {spellMode ? "Done editing" : "Spell-check mode"}
+                      </button>
+                      <button
+                        onClick={() => handleCopy("citation")}
+                        className="cursor-pointer text-[12px] font-semibold px-[11px] py-[6px] rounded-[9px] bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-[border-color,color] duration-150"
+                      >
+                        Copy Citation
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    contentEditable={spellMode}
+                    suppressContentEditableWarning
+                    spellCheck={spellMode}
+                    onInput={(e) => {
+                      if (spellMode) {
+                        setCitation(e.currentTarget.textContent || "");
+                      }
+                    }}
+                    onBlur={() => {
+                      if (spellMode) {
+                        setChecks(runChecks(citation, soa, form));
+                      }
+                    }}
+                    className={`w-full min-h-[300px] text-[15px] leading-[1.62] text-[#1a1f27] border rounded-[10px] p-[16px_18px] whitespace-pre-wrap break-words outline-none ${
+                      spellMode ? "bg-[#fffef9] shadow-[inset_0_0_0_2px_rgba(197,164,78,.4)]" : "bg-[#fffdf8] border-[#dcd6c8]"
+                    }`}
+                    style={{ fontFamily: '"Iowan Old Style", "Palatino Linotype", Georgia, serif' }}
+                  >
+                    {citation || (!spellMode && <span className="text-[#6b6f76] italic" style={{ fontFamily: "inherit" }}>Your proposed citation will appear here.</span>)}
                   </div>
                 </>
               ) : (
