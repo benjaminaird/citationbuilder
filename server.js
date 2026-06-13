@@ -117,6 +117,8 @@ app.post("/api/improve", async (req, res) => {
     "- If the citation must be shortened, remove generic adjectives, filler phrases, and the weakest accomplishments before removing numbers or measurable impact.",
     "- Group related accomplishments by duty or topic so the citation and Summary of Action do not bounce between unrelated subjects.",
     "- Prioritize major leadership, quantified impact, duration, personnel, money or resources, command advisory, readiness, ceremonial or operational or community impact, and place routine professional development last.",
+    "- When facts support it, retain public visibility and scope indicators such as national, international, diplomatic, presidential, state ceremony, senior military or civilian leader, battalion-wide, command-wide, and installation-wide impact.",
+    "- Keep the award-specific citation frame: opening sentence first, accomplishment body second, standard credit/traditions closing last.",
   ].join("\n");
 
   const isUpper = ["NAM", "NMC", "CERTCOM"].includes(award);

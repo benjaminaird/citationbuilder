@@ -209,12 +209,13 @@ const STRONG_VERBS = /\b(led|spearheaded|orchestrated|directed|championed|galvan
 const LEADERSHIP_TERMS = /\b(leadership|initiative|judgment|responsibility|accountability|stewardship|guidance|mentorship|example|standard)\b/i;
 const RESULT_TERMS = /\b(resulted in|yielded|achieved|attained|produced|generated|delivered|improved|increased|reduced|eliminated|exceeded|surpassed|enhanced)\b/i;
 const QUANTIFIABLE = /\b(\d+\s*(percent|%|Marines?|Sailors?|personnel|service members?|members|events?|ceremonies?|inspections?|trainings?|hours?|days?|weeks?|months?|years?|beneficiaries|profiles?|authorizations?|vouchers?|claims?|dollars?|\$))\b|\$\s?\d+|\b(zero|no)\s+(discrepanc|error|failure|incident|loss)/i;
+const VISIBILITY_TERMS = /\b(national|international|diplomatic|state ceremony|presidential|senior military|senior civilian|distinguished visitors?|public visibility|global prestige|strategic|battalion-wide|command-wide|installation-wide)\b/i;
 
 const SCOPE_TERMS = {
   individual: /\b(individual|personally|single|shop|desk|task)\b/i,
   section: /\b(section|team|squad|platoon|detail|watch|shift|cell)\b/i,
   unit: /\b(unit|company|battery|detachment|battalion|squadron|command)\b/i,
-  command: /\b(command-wide|regiment|group|wing|base|installation|headquarters|enterprise)\b/i,
+  command: /\b(command-wide|battalion-wide|installation-wide|regiment|group|wing|base|installation|headquarters|enterprise|national|international|diplomatic|presidential)\b/i,
   service: /\b(service-wide|marine corps|navy|department|institutional|enterprise-wide|force-wide)\b/i,
 };
 
@@ -487,6 +488,8 @@ function accomplishmentPriorityScore(line: string, form: FormState): number {
   if (/\$\s?\d|(?:dollars?|funds?|budget|resources?|claims?)/i.test(text)) score += 18;
   if (/\b(?:defense travel system|dts|travel|voucher|authorization|profile|claim)\b/i.test(text)) score += 18;
   if (/\b(?:advised|briefed|counseled|recommended|informed)\b.*\b(?:commander|commanding officer|senior enlisted|leadership)\b/i.test(text)) score += 18;
+  if (VISIBILITY_TERMS.test(text)) score += 16;
+  if (/\b(?:funerals?|parades?|ceremonies|ceremonial|diplomatic honors?|state ceremonies|presidential|evening parade|sunset parade|battle color)\b/i.test(text)) score += 12;
   score += scopeLevel(text) * 10;
   if (/(mission|readiness|operational|ceremonial|inspection|deployment|training|command)/i.test(text)) score += 12;
   if (/(read one book|professional development|completed course|fed my cat|litter box|showed up|did my job)/i.test(text)) score -= 28;
@@ -534,7 +537,10 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
   const quant = Math.min(4, countMatches(text, QUANTIFIABLE));
   const leadership = Math.min(4, countMatches(text, STRONG_VERBS) + countMatches(text, LEADERSHIP_TERMS));
   const results = Math.min(4, countMatches(text, RESULT_TERMS));
-  const language = /(transformational|institutional|service-wide|command-wide|enduring|exceptional|monumental|strategic|enterprise)/i.test(text) ? 2 : 0;
+  const months = serviceMonths(form);
+  let language = /(transformational|institutional|service-wide|command-wide|enduring|exceptional|monumental|strategic|enterprise)/i.test(text) ? 2 : 0;
+  if (VISIBILITY_TERMS.test(text)) language += 1;
+  if (months !== null && months >= 24) language += 1;
   const support = Math.min(4, Math.round((rank + billet + scope + Math.min(4, lines.length) + quant + leadership + results + language) / 7));
   const selected = awardLevel(form.award);
   const diff = selected - support;
@@ -780,6 +786,13 @@ function dateOrderError(form: FormState): string | null {
   const to = parseServiceDate(form.dateTo);
   if (!from || !to) return null;
   return to.getTime() < from.getTime() ? "End date must be after start date." : null;
+}
+
+function serviceMonths(form: FormState): number | null {
+  const from = parseServiceDate(form.dateFrom);
+  const to = parseServiceDate(form.dateTo);
+  if (!from || !to || to.getTime() < from.getTime()) return null;
+  return ((to.getFullYear() - from.getFullYear()) * 12) + (to.getMonth() - from.getMonth()) + 1;
 }
 
 function applyCase(text: string, mode: "upper" | "sentence"): string {
@@ -1177,6 +1190,21 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   for (const issue of analyzeWeakInput(form)) {
     checks.push({ status: "warn", title: issue.title, detail: issue.detail });
   }
+  const months = serviceMonths(form);
+  if ((form.award === "MSM" || form.award === "LOM") && months !== null && months < 18) {
+    checks.push({
+      status: "warn",
+      title: "Sustained meritorious period",
+      detail: "Example MSM/LOM packages usually show sustained, broad impact over a longer meritorious period. Add stronger scope and duration context if this is an impact award.",
+    });
+  }
+  if ((form.award === "MSM" || form.award === "LOM") && !VISIBILITY_TERMS.test(`${form.achievements} ${citation} ${soa}`)) {
+    checks.push({
+      status: "warn",
+      title: "Senior-scope impact",
+      detail: "Higher awards are stronger when they show command-wide, installation-wide, national, international, senior-leader, or strategic visibility.",
+    });
+  }
   checks.push(...analyzeRealityIssues(form));
   checks.push(...analyzeOVSMIssues(form));
 
@@ -1238,6 +1266,18 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   }
 
   if (!citation) return checks;
+
+  const expectedOpening = applyCase(cleanup(buildOpening(form)), cfg.casing);
+  const normalizedCitation = cleanup(citation);
+  if (expectedOpening && !normalizedCitation.toLowerCase().startsWith(expectedOpening.toLowerCase())) {
+    checks.push({
+      status: "warn",
+      title: "Opening sentence",
+      detail: "Citation opening no longer matches the selected award, billet, unit, and dates. Regenerate or use Fix With AI before submission.",
+    });
+  } else if (expectedOpening) {
+    checks.push({ status: "ok", title: "Opening sentence", detail: "Opening matches selected award and service period." });
+  }
 
   // Unit formatting
   const badUnit = /Marine Barracks\s+Washington\s+DC\b/i.test(citation)
