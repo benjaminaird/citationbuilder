@@ -833,6 +833,59 @@ function applyCase(text: string, mode: "upper" | "sentence"): string {
   return mode === "upper" ? text.toUpperCase() : text;
 }
 
+function restoreSOATerms(text: string, form: FormState): string {
+  const canonicalTerms = [
+    "Marine Corps",
+    "Marine",
+    "Marines",
+    "United States Marine Corps",
+    "United States Naval Service",
+    "National Capital Region",
+    "Summary of Action",
+    "Washington, D.C.",
+    "S-1",
+    "EDIPI",
+    "OMPF",
+    "APS",
+    AWARDS[form.award].label,
+    form.rank,
+    form.firstName,
+    form.lastName,
+    rankLast(form),
+    displayUnit(form.unit),
+  ].filter(Boolean);
+
+  let out = text;
+  for (const term of canonicalTerms) {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`\\b${escaped}\\b`, "gi"), term);
+  }
+  return out;
+}
+
+function paragraphCase(text: string, form: FormState): string {
+  const letters = text.replace(/[^A-Za-z]/g, "");
+  if (!letters) return text;
+  const upperRatio = letters.replace(/[^A-Z]/g, "").length / letters.length;
+  if (upperRatio < 0.72) return restoreSOATerms(text, form);
+
+  let out = text.toLowerCase();
+  out = out.replace(/(^|[.!?]\s+)([a-z])/g, (_, prefix: string, letter: string) => prefix + letter.toUpperCase());
+  out = out.replace(/\bi\b/g, "I");
+  return restoreSOATerms(out, form);
+}
+
+function normalizeSOA(text: string, form: FormState): string {
+  const headingOnly = /^(background|accomplishments?|recommendation|summary of action|soa)$/i;
+  const paragraphs = enforceWashington(expandAbbr(text))
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n+/g, " ").trim())
+    .filter((paragraph) => paragraph && !headingOnly.test(paragraph.replace(/[:.]/g, "").trim()))
+    .map((paragraph) => paragraphCase(cleanup(paragraph), form));
+
+  return cleanup(paragraphs.join("\n\n"));
+}
+
 function rankLast(form: FormState): string {
   return [form.rank, form.lastName].filter(Boolean).join(" ").trim() || "[Rank Lastname]";
 }
@@ -1888,7 +1941,9 @@ export default function Index() {
         realityFindings: findings.realityFindings,
       });
 
-      const nextSoa = cfg.citationOnly ? "" : cleanup(expandAbbr(d.loa || d.soa || soa));
+      const nextSoa = cfg.citationOnly ? "" : cfg.isLOA
+        ? cleanup(expandAbbr(d.loa || soa))
+        : normalizeSOA(d.soa || soa, form);
       const nextCitation = cfg.isLOA ? "" : enforceCitationLimit(expandAbbr(d.citation || citation), form);
       const nextChecks = runChecks(nextCitation, nextSoa, form);
       const afterIssues = nextChecks.filter((check) => check.status !== "ok").length;
@@ -1966,11 +2021,11 @@ export default function Index() {
       return;
     }
 
-    let newSoa = cfg.citationOnly ? "" : cleanup(buildSOA(form));
+    let newSoa = cfg.citationOnly ? "" : normalizeSOA(buildSOA(form), form);
     if (!cfg.citationOnly && aiEnhancement && aiAvailable) {
       try {
         const improved = await requestAIImprove({ mode: "soa", award: form.award, soa: newSoa, ...aiContextPayload() });
-        newSoa = cleanup(expandAbbr(improved.soa || newSoa));
+        newSoa = normalizeSOA(improved.soa || newSoa, form);
         if (Array.isArray(improved.notes)) collectedNotes.push(...improved.notes.map((n: unknown) => String(n)));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "AI request failed");
@@ -2296,7 +2351,7 @@ ${bodyContent}
       const d = await r.json();
       if (!r.ok) { toast.error(d.error || "AI request failed"); return; }
 
-      const outSoa = cleanup(expandAbbr(d.soa || soa));
+      const outSoa = normalizeSOA(d.soa || soa, form);
       setSoa(outSoa);
 
       const notes = Array.isArray(d.notes) ? d.notes.map((n: unknown) => String(n)).slice(0, 8) : [];
@@ -2426,7 +2481,7 @@ ${bodyContent}
         toast.success("AI refinement applied");
       } else {
         const outCite = enforceCitationLimit(expandAbbr(d.citation || citation), form);
-        const outSoa = cleanup(expandAbbr(d.soa || soa));
+        const outSoa = normalizeSOA(d.soa || soa, form);
 
         setSoa(outSoa);
         setCitation(outCite);
@@ -3615,6 +3670,7 @@ export {
   buildOpening,
   buildSOA,
   enforceCitationLimit,
+  normalizeSOA,
   redactSensitiveForAI,
   runChecks,
 };

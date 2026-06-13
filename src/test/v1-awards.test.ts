@@ -7,6 +7,7 @@ import {
   assembleCitation,
   buildLOA,
   buildSOA,
+  normalizeSOA,
   redactSensitiveForAI,
   runChecks,
   type AwardKey,
@@ -79,6 +80,21 @@ describe("CitationBuilder V1 award engine", () => {
     expect(loa).toContain("Outstanding Volunteer Service Medal");
     expect(AWARDS.OVSM.isLOA).toBe(true);
     expect(runChecks("", loa, form).filter((check) => check.status === "err")).toHaveLength(0);
+  });
+
+  it("keeps SOA paragraph prose in normal case while citations follow award casing", () => {
+    const form = makeForm("NAM");
+    const soa = normalizeSOA(
+      "SERGEANT MARINE LED 24 MARINES THROUGH 18 CEREMONIES WITH ZERO DISCREPANCIES.\n\nBACKGROUND\n\nSHE IMPROVED READINESS FROM 65 PERCENT TO 85 PERCENT.",
+      form,
+    );
+    const citation = assembleCitation(form);
+
+    expect(soa).toContain("Sergeant Marine led 24 Marines");
+    expect(soa).toContain("\n\nShe improved readiness");
+    expect(soa).not.toContain("BACKGROUND");
+    expect(soa.replace(/[^A-Za-z]/g, "")).not.toBe(soa.replace(/[^A-Za-z]/g, "").toUpperCase());
+    expect(citation.replace(/[^A-Za-z]/g, "")).toBe(citation.replace(/[^A-Za-z]/g, "").toUpperCase());
   });
 
   it("redacts EDIPI and SSN-looking values from AI payloads", () => {
