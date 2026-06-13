@@ -4,7 +4,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import { saveAs } from "file-saver";
 
 /* ================================================================
-   CitationBuilder v2 — Marine Corps Award Drafting Engine
+   CitationBuilder v1 — Marine Corps Award Drafting Engine
    Formatting, validation & drafting first. AI is optional.
    ================================================================ */
 
@@ -175,6 +175,9 @@ const UNIT_PRESETS = [
 ] as const;
 const STORAGE_KEY = "citationbuilder.form";
 const SAVED_DRAFTS_KEY = "citationbuilder.savedDrafts";
+const RELEASE_NOTICE_KEY = "citationbuilder.v1ReleaseNoticeAccepted";
+const APP_VERSION = "v1.0";
+const SUPPORT_EMAIL = "mailto:benjaminaird@yahoo.com?subject=CitationBuilder%20V1%20Issue";
 
 // ---- Helpers ----
 function expandAbbr(text: string): string {
@@ -707,6 +710,24 @@ function cleanup(text: string): string {
     .trim();
 }
 
+function redactSensitiveForAI(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value
+      .replace(/\b\d{10}\b/g, "[REDACTED EDIPI]")
+      .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[REDACTED SSN]")
+      .replace(/\bEDIPI\s*[:#]?\s*\d+\b/gi, "EDIPI: [REDACTED]");
+  }
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveForAI(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => !/edipi|ssn|social/i.test(key))
+        .map(([key, item]) => [key, redactSensitiveForAI(item)]),
+    );
+  }
+  return value;
+}
+
 function citationSentences(text: string): string[] {
   return cleanup(text)
     .split(/(?<=[.!?])\s+/)
@@ -860,7 +881,7 @@ function buildClosing(form: FormState): string {
     return `${rl}'s initiative, perseverance, and total dedication to duty reflected credit upon ${p.obj} and were in keeping with the highest traditions of the Marine Corps and the United States Naval Service.`;
   }
 
-  if (cfg.closing === "great" || cfg.closing === "loa") {
+  if (cfg.greatCredit || cfg.closing === "great" || cfg.closing === "loa") {
     return `${rl}'s professionalism, perseverance, and loyal dedication to duty reflected great credit on ${p.obj} and were in keeping with the highest traditions of the Marine Corps and the United States Naval Service.`;
   }
   return `By ${p.poss} ${form.attr1}, ${form.attr2}, and ${form.adj} dedication to duty, ${rl} reflected credit upon ${p.refl} and upheld the highest traditions of the Marine Corps and the United States Naval Service.`;
@@ -1552,6 +1573,7 @@ export default function Index() {
   const [exportOpen, setExportOpen] = useState<boolean>(false);
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [showStartupDialog, setShowStartupDialog] = useState<boolean>(false);
+  const [showReleaseNotice, setShowReleaseNotice] = useState<boolean>(false);
   const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>(loadSavedDrafts);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [showCatPopup, setShowCatPopup] = useState<boolean>(false);
@@ -1576,6 +1598,13 @@ export default function Index() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
+      try {
+        if (localStorage.getItem(RELEASE_NOTICE_KEY) !== "1") {
+          setShowReleaseNotice(true);
+        }
+      } catch {
+        setShowReleaseNotice(true);
+      }
       if (hasRestored.current) return;
       hasRestored.current = true;
       try {
@@ -1593,6 +1622,11 @@ export default function Index() {
     }, 3500);
     return () => clearTimeout(timer);
   }, []);
+
+  function handleAcceptReleaseNotice() {
+    try { localStorage.setItem(RELEASE_NOTICE_KEY, "1"); } catch { /* ignore */ }
+    setShowReleaseNotice(false);
+  }
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -1729,6 +1763,22 @@ export default function Index() {
     toast.success("Draft deleted");
   }
 
+  function handleClearLocalDrafts() {
+    if (!window.confirm("Clear autosave and all saved drafts from this browser? This cannot be undone.")) return;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SAVED_DRAFTS_KEY);
+    } catch { /* ignore */ }
+    setSavedDrafts([]);
+    setActiveDraftId(null);
+    setSoa("");
+    setCitation("");
+    setChecks([]);
+    setAiNotes([]);
+    setAiFixSummary(null);
+    toast.success("Local drafts cleared");
+  }
+
   // Check AI status
   useEffect(() => {
     fetch("/api/health")
@@ -1768,13 +1818,16 @@ export default function Index() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+    // Keep the shortcut bound to the current form state without rebinding on unrelated UI state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
   async function requestAIImprove(payload: Record<string, unknown>) {
+    const safePayload = redactSensitiveForAI(payload) as Record<string, unknown>;
     const r = await fetch("/api/improve", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "AI request failed");
@@ -2413,6 +2466,14 @@ ${bodyContent}
   const passedChecks = checks.filter((c) => c.status === "ok").length;
   const errorChecks = checks.filter((c) => c.status === "err").length;
   const scorePct = totalChecks ? Math.round((passedChecks / totalChecks) * 100) : 0;
+  const reviewerChecklist = [
+    { label: "Draft generated", ok: Boolean(cfg.isLOA ? soa : citation), detail: cfg.isLOA ? "LOA present" : cfg.citationOnly ? "Citation/certificate present" : "SOA and citation present" },
+    { label: "No blocking validation errors", ok: checks.length > 0 && errorChecks === 0, detail: errorChecks ? `${errorChecks} error${errorChecks === 1 ? "" : "s"} remaining` : "No errors found" },
+    { label: "Opening and closing checked", ok: checks.some((check) => check.title === "Opening sentence" && check.status === "ok") || cfg.isLOA, detail: cfg.isLOA ? "LOA format checked" : "Opening frame validated" },
+    { label: "Character or format limit checked", ok: checks.some((check) => /Character limit|format/i.test(check.title)), detail: cfg.maxChars ? `${charCount}/${cfg.maxChars}` : "Certificate/LOA format reviewed" },
+    { label: "Privacy posture", ok: true, detail: "EDIPI excluded/redacted from AI requests" },
+    { label: "Final human review", ok: false, detail: "S-1/adjutant and command review still required" },
+  ];
 
   return (
     <>
@@ -2476,15 +2537,63 @@ ${bodyContent}
           />
           <div className="min-w-0">
             <h1 className="text-[15px] sm:text-[16px] lg:text-[17px] font-bold tracking-[.3px] text-white m-0 leading-tight">
-              CitationBuilder
+              CitationBuilder <span className="text-[#e6d29a] font-semibold">{APP_VERSION}</span>
             </h1>
             <p className="mt-[1px] sm:mt-[2px] text-[10.5px] sm:text-[11.5px] lg:text-[12px] text-[#aeb6c2] m-0 hidden sm:block">
-              Marine Corps award formatting, validation & drafting engine
+              Battalion-ready Marine Corps award formatting, validation & drafting engine
             </p>
           </div>
           <div className="flex-1" />
+          <a
+            href={SUPPORT_EMAIL}
+            className="hidden sm:inline-flex text-[12px] font-semibold px-[11px] py-[7px] rounded-[8px] border border-[#4d5664] text-[#d8dee8] hover:text-white hover:border-[#c5a44e] transition-colors"
+          >
+            Report Issue
+          </a>
         </div>
       </header>
+
+      {/* V1 Privacy and Use Notice */}
+      {showReleaseNotice && !showStartupDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(17,22,29,.58)", backdropFilter: "blur(6px)" }}>
+          <div className="bg-white rounded-[14px] shadow-[0_16px_48px_rgba(17,22,29,.28)] max-w-[620px] w-[92%] p-[24px]" style={{ animation: "fadeIn .2s ease" }}>
+            <div className="flex items-start gap-[13px]">
+              <div className="w-[42px] h-[42px] rounded-[10px] grid place-items-center shrink-0" style={{ background: "linear-gradient(160deg, #a01722, #7c0f19)" }}>
+                <span className="text-[#e6d29a] font-extrabold text-[18px]">V1</span>
+              </div>
+              <div>
+                <h2 className="m-0 text-[18px] font-bold text-[#11161d]">CitationBuilder {APP_VERSION} Release Notice</h2>
+                <p className="m-0 mt-[7px] text-[13.5px] text-[#3a414b] leading-[1.5]">
+                  Use this as a drafting and validation aid. Final awards still require chain-of-command, S-1/adjutant, and current SECNAV/unit SOP review.
+                </p>
+              </div>
+            </div>
+            <div className="mt-[16px] grid gap-[9px] text-[12.5px] leading-[1.45] text-[#3a414b]">
+              <div className="rounded-[9px] border border-[#f0b8b3] bg-[#fef7f6] p-[10px_12px]">
+                Do not enter classified information, CUI, medical/legal/disciplinary details, or sensitive operational details.
+              </div>
+              <div className="rounded-[9px] border border-[#dcd6c8] bg-[#faf8f3] p-[10px_12px]">
+                AI refinement sends draft wording and accomplishments to the configured AI provider. EDIPI/SSN-like values are redacted before AI requests, and EDIPI is not included in AI payload fields.
+              </div>
+              <div className="rounded-[9px] border border-[#dcd6c8] bg-[#faf8f3] p-[10px_12px]">
+                Drafts are saved locally in this browser. Clear local drafts before using a shared computer or handing the workstation to another user.
+              </div>
+            </div>
+            <div className="mt-[16px] flex flex-wrap gap-[9px] justify-end">
+              <a href={SUPPORT_EMAIL} className="text-[13px] font-semibold px-[13px] py-[9px] rounded-[9px] bg-white border border-[#dcd6c8] text-[#3a414b] hover:border-[#a01722] hover:text-[#a01722] transition-colors">
+                Report an Issue
+              </a>
+              <button
+                onClick={handleAcceptReleaseNotice}
+                className="cursor-pointer text-[13px] font-semibold px-[15px] py-[9px] rounded-[9px] text-white border-none"
+                style={{ background: "linear-gradient(160deg, #a01722, #7c0f19)", boxShadow: "0 6px 16px rgba(160,23,34,.22)" }}
+              >
+                Acknowledge and Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Startup Privacy Dialog */}
       {showStartupDialog && (
@@ -2987,6 +3096,12 @@ ${bodyContent}
               >
                 {activeDraftId ? "Update Draft" : "Save Current"}
               </button>
+              <button
+                onClick={handleClearLocalDrafts}
+                className="cursor-pointer text-[12px] font-semibold px-[11px] py-[7px] rounded-[8px] bg-white border border-[#f0b8b3] text-[#b3261e] hover:bg-[#fef7f6] transition-colors"
+              >
+                Clear Local Drafts
+              </button>
             </div>
             <div className="p-3 grid gap-[8px]">
               {savedDrafts.length ? savedDrafts.map((draft) => (
@@ -3421,6 +3536,27 @@ ${bodyContent}
               )}
             </div>
 
+            {/* Reviewer checklist */}
+            <div className="p-[12px_16px] border-b border-[#dcd6c8] bg-[#fbfaf6]">
+              <h4 className="m-0 mb-[8px] text-[11px] uppercase tracking-[.1em] text-[#6b6f76]">V1 Reviewer Checklist</h4>
+              <div className="grid gap-[6px]">
+                {reviewerChecklist.map((item) => (
+                  <div key={item.label} className="flex items-start gap-[8px] text-[12.3px] leading-[1.35]">
+                    <span
+                      className="mt-[1px] w-[16px] h-[16px] rounded-full grid place-items-center text-[10px] font-extrabold text-white shrink-0"
+                      style={{ background: item.ok ? "#2f7d44" : "#b5751a" }}
+                    >
+                      {item.ok ? "\u2713" : "!"}
+                    </span>
+                    <span className="min-w-0">
+                      <b className="text-[#11161d]">{item.label}</b>
+                      <span className="block text-[#6b6f76]">{item.detail}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Checks list */}
             {checks.length > 0 ? (
               <ul className="list-none m-0 p-2 grid gap-[6px]">
@@ -3457,12 +3593,29 @@ ${bodyContent}
 
       {/* Footer */}
       <footer className="max-w-[1480px] mx-auto px-[16px] lg:px-[22px] pt-2 pb-[30px]">
-        <p className="text-[11.5px] text-[#6b6f76] m-0">
-          Drafting aid only — verify against the current SECNAV M-1650.1 / unit awards SOP before submission. Drafts autosave to this browser.{" "}
-          <kbd className="font-mono bg-[#ece6d8] px-[5px] py-[1px] rounded text-[11px]">Ctrl/⌘ + Enter</kbd> generates.
-        </p>
+        <div className="rounded-[10px] border border-[#dcd6c8] bg-white/70 p-[11px_13px] text-[11.5px] text-[#6b6f76] leading-[1.45]">
+          <b className="text-[#11161d]">CitationBuilder {APP_VERSION}</b> is a drafting aid only. Verify every package against current SECNAV M-1650.1, command SOP, and S-1/adjutant guidance before submission. AI may produce incorrect wording; do not enter classified, CUI, medical, legal, disciplinary, or sensitive operational details. Drafts autosave locally in this browser.{" "}
+          <kbd className="font-mono bg-[#ece6d8] px-[5px] py-[1px] rounded text-[11px]">Ctrl/⌘ + Enter</kbd> generates.{" "}
+          <a href={SUPPORT_EMAIL} className="font-semibold text-[#a01722] underline decoration-[#d8bb63] underline-offset-2">Report an issue</a>.
+        </div>
       </footer>
     </div>
     </>
   );
 }
+
+/* eslint-disable react-refresh/only-export-components -- V1 smoke tests exercise the citation engine in this single-file app. */
+export {
+  APP_VERSION,
+  AWARDS,
+  DEFAULT_FORM,
+  assembleCitation,
+  buildClosing,
+  buildLOA,
+  buildOpening,
+  buildSOA,
+  enforceCitationLimit,
+  redactSensitiveForAI,
+  runChecks,
+};
+export type { AwardKey, FormState };

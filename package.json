@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "smoke:v1": "vitest run src/test/v1-awards.test.ts",
     "test:watch": "vitest",
     "start": "node server.js"
   },
