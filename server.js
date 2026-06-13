@@ -120,9 +120,11 @@ app.post("/api/improve", async (req, res) => {
     "- When facts support it, retain public visibility and scope indicators such as national, international, diplomatic, presidential, state ceremony, senior military or civilian leader, battalion-wide, command-wide, and installation-wide impact.",
     "- Keep the award-specific citation frame: opening sentence first, accomplishment body second, standard credit/traditions closing last.",
     "- For Meritorious Mast and Certificate of Commendation, treat the output as a citation/certificate only; do not create or require a Summary of Action.",
+    "- Meritorious Mast must remain ALL CAPS, use the mandatory 'DURING THE PERIOD OF ... THROUGH ...' opening, use an initiative/perseverance/total dedication closing, and fit the portrait certificate style of about 14 lines.",
+    "- Certificate of Commendation must remain ALL CAPS, use the mandatory 'EXCEPTIONAL PERFORMANCE OF ... DUTIES' opening, use a 'reflected great credit' closing, and fit the landscape certificate style of about 9 lines.",
   ].join("\n");
 
-  const isUpper = ["NAM", "NMC", "CERTCOM"].includes(award);
+  const isUpper = ["MMAST", "NAM", "NMC", "CERTCOM"].includes(award);
   const caseRule = isUpper
     ? "The citation must remain in ALL CAPITAL LETTERS."
     : "The citation must remain in sentence case (mixed case, like normal prose).";

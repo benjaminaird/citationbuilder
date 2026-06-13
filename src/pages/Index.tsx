@@ -99,8 +99,8 @@ const RANKS = [
 ] as const;
 
 const AWARDS: Record<AwardKey, AwardConfig> = {
-  MMAST:   { label: "Meritorious Mast",                       casing: "sentence", maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
-  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
+  MMAST:   { label: "Meritorious Mast",                       casing: "upper",    maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
+  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: true,  isLOA: false, citationOnly: true },
   OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
   NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
   NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
@@ -714,6 +714,15 @@ function citationSentences(text: string): string[] {
     .filter(Boolean);
 }
 
+function estimatedCitationLines(text: string, charsPerLine: number): number {
+  const cleaned = cleanup(text);
+  if (!cleaned) return 0;
+  return cleaned
+    .split(/\n+/)
+    .map((line) => Math.max(1, Math.ceil(line.trim().length / charsPerLine)))
+    .reduce((sum, lines) => sum + lines, 0);
+}
+
 function enforceCitationLimit(text: string, form: FormState): string {
   const cfg = AWARDS[form.award];
   if (!cfg.maxChars) return applyCase(cleanup(text), cfg.casing);
@@ -826,13 +835,13 @@ function buildOpening(form: FormState): string {
 
   switch (form.award) {
     case "MMAST":
-      return `I commend you for professional excellence and superior achievement while serving as ${billet}, ${unit} from ${from} to ${to}.`;
+      return `During the period of ${from} through ${to}, ${rl} performed ${p.poss} demanding duties in an outstanding manner while serving as ${billet}, ${unit}.`;
     case "NAM":
       return `Professional achievement in the superior performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "NMC":
       return `Meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "CERTCOM":
-      return `Superior performance of duty while serving as ${billet}, ${unit} from ${from} to ${to}. ${rl} performed ${p.poss} duties in an exemplary and highly professional manner.`;
+      return `Exceptional performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}. ${rl} performed ${p.poss} demanding duties in an exemplary and highly professional manner.`;
     case "MSM":
       return `For outstanding meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "LOM":
@@ -846,6 +855,10 @@ function buildClosing(form: FormState): string {
   const p = PRONOUNS[form.pronoun];
   const rl = rankLast(form);
   const cfg = AWARDS[form.award];
+
+  if (form.award === "MMAST") {
+    return `${rl}'s initiative, perseverance, and total dedication to duty reflected credit upon ${p.obj} and were in keeping with the highest traditions of the Marine Corps and the United States Naval Service.`;
+  }
 
   if (cfg.closing === "great" || cfg.closing === "loa") {
     return `${rl}'s professionalism, perseverance, and loyal dedication to duty reflected great credit on ${p.obj} and were in keeping with the highest traditions of the Marine Corps and the United States Naval Service.`;
@@ -1334,11 +1347,11 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   if (cfg.greatCredit) {
     checks.push(hasGreat
       ? { status: "ok", title: "\"Great credit\"", detail: "Correct for this award level." }
-      : { status: "warn", title: "\"Great credit\"", detail: "MSM/LOM closing usually reads \"reflected great credit.\"" }
+      : { status: "warn", title: "\"Great credit\"", detail: `${AWARDS[form.award].label} closing should read "reflected great credit."` }
     );
   } else {
     checks.push(hasGreat
-      ? { status: "err", title: "\"Great credit\" misuse", detail: "Reserved for MSM and above — remove \"great.\"", fixId: "fixGreat" }
+      ? { status: "err", title: "\"Great credit\" misuse", detail: "This award closing should read \"reflected credit\" without \"great.\"", fixId: "fixGreat" }
       : { status: "ok", title: "Credit phrasing", detail: "\"Reflected credit\" — correct for this award." }
     );
   }
@@ -1352,6 +1365,22 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
     } else {
       checks.push({ status: "ok", title: "Character limit", detail: `${citation.length}/${cfg.maxChars} — within target.` });
     }
+  }
+
+  if (form.award === "MMAST") {
+    const lines = estimatedCitationLines(citation, 78);
+    checks.push(lines <= 14
+      ? { status: "ok", title: "Meritorious Mast format", detail: "Citation-only recognition; not processed through APS and should be forwarded for OMPF entry." }
+      : { status: "warn", title: "Meritorious Mast format", detail: `Estimated ${lines}/14 lines. Shorten to fit the portrait Meritorious Mast certificate format.` }
+    );
+  }
+
+  if (form.award === "CERTCOM") {
+    const lines = estimatedCitationLines(citation, 128);
+    checks.push(lines <= 9
+      ? { status: "ok", title: "CertCom format", detail: "Citation-only recognition; use all caps and forward for OMPF entry." }
+      : { status: "warn", title: "CertCom format", detail: `Estimated ${lines}/9 lines. Shorten to fit the landscape Certificate of Commendation format.` }
+    );
   }
 
   // Closing sentence
