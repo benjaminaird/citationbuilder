@@ -12,6 +12,7 @@
     "test": "vitest run",
     "smoke:v1": "vitest run src/test/v1-awards.test.ts",
     "test:watch": "vitest",
+    "pages:dev": "npm run build && npx wrangler pages dev dist",
     "start": "node server.js"
   },
   "dependencies": {
