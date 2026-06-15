@@ -332,7 +332,7 @@ export async function onRequest({ request, env }) {
   const apiKey = env.ANTHROPIC_API_KEY || "";
   if (!apiKey) {
     return json({
-      error: "AI refinement is unavailable: ANTHROPIC_API_KEY is not configured in Cloudflare Pages. All formatting, validation, and drafting features still work without it.",
+      error: "AI refinement is unavailable: ANTHROPIC_API_KEY is not configured for this deployment. All formatting, validation, and drafting features still work without it.",
     }, 503);
   }
 
