@@ -36,11 +36,23 @@ Create a new Render Web Service from this GitHub repository.
 
 This repository also includes `render.yaml`, so you can use Render's blueprint flow if preferred.
 
-## Cloudflare Pages deployment
+## Cloudflare deployment
 
-Cloudflare Pages is the preferred free hosting target because the static app and `/api/*` Pages Functions do not run on a sleeping Node web service.
+Cloudflare is the preferred free hosting target because the static app and `/api/*` Worker endpoints do not run on a sleeping Node web service.
 
-Create a new Cloudflare Pages project from this GitHub repository:
+Create a new Cloudflare Workers & Pages application from this GitHub repository:
+
+- Build command: `npm run build`
+- Deploy command: `npx wrangler deploy`
+- Project name: `citationbuilder`
+- Production branch: `main`
+
+The `wrangler.toml` file tells Cloudflare to deploy `dist` as static assets and use `worker/index.js` for API routes:
+
+- `GET /api/health`
+- `POST /api/improve`
+
+If Cloudflare shows the older Pages setup instead, use:
 
 - Framework preset: `Vite`
 - Build command: `npm run build`
@@ -56,13 +68,8 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 ANTHROPIC_FALLBACK_MODEL=claude-haiku-4-5-20251001
 ```
 
-The app includes Cloudflare Pages Functions for:
-
-- `GET /api/health`
-- `POST /api/improve`
-
 For local Cloudflare-style testing, create an ignored `.dev.vars` file with the same variables, then run:
 
 ```bash
-npm run pages:dev
+npm run cloudflare:dev
 ```
