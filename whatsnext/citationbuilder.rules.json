@@ -1,0 +1,354 @@
+{
+  "app": "citationbuilder",
+  "name": "CitationBuilder",
+  "exportedAt": "2026-06-15T13:29:54.813Z",
+  "source": "WhatsNext App Control",
+  "rules": [
+    {
+      "id": "cb-ov-what",
+      "title": "What CitationBuilder Is",
+      "category": "Overview",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "CitationBuilder is a drafting and validation tool for USN/USMC award citations and Summaries of Action. It takes the facts of a Marine’s service and helps produce a correctly-formatted, appropriately-toned citation that fits the hard character limits, then exports a clean DOCX/PDF package. It is a writing aid for the author and reviewer — not an approval authority.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-ov-not",
+      "title": "What CitationBuilder Is Not",
+      "category": "Overview",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "CitationBuilder does not decide who gets an award, does not submit packages, and does not inflate accomplishments to fit a level. It will not exceed a character limit, will not invent facts, and will not change the requested award on its own. It flags problems and proposes grounded wording; a human writes and approves the final citation.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-ov-philosophy",
+      "title": "Writing Philosophy",
+      "category": "Overview",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Good citations are specific, credible, and grounded. CitationBuilder favors concrete accomplishments paired with measurable impact over generic superlatives, keeps the tone matched to the award level, and reads as believable rather than inflated. The examples you provide guide style; they are not copied.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-char-limits",
+      "title": "Citation Character Limits",
+      "category": "Validation",
+      "status": "active",
+      "locked": true,
+      "plainEnglishRule": "Each award and citation block has a hard character limit that must never be exceeded. The generator must fit within the limit; if content is too long it is tightened, never truncated mid-thought. Limits are format-critical and locked.",
+      "config": {
+        "enforce": "hard",
+        "perAward": {
+          "NAM": 1000,
+          "NCM": 1500
+        },
+        "onOverflow": "tighten_not_truncate"
+      },
+      "tests": [
+        "Generated citations never exceed the award’s character limit.",
+        "Overflow is resolved by tightening, not hard truncation."
+      ]
+    },
+    {
+      "id": "cb-nam-opening",
+      "title": "NAM Opening",
+      "category": "Formatting",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Same, plus: prefer a concrete duty accomplishment in the opening clause over a generic adjective; avoid leading with “superior performance”.",
+      "config": {
+        "voice": "standard_recognition",
+        "forbidGenericOpeners": true,
+        "preferConcreteOpener": true,
+        "requireDutyAndPeriod": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-soa",
+      "title": "SOA Structure",
+      "category": "Formatting",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The Summary of Action follows a clear paragraph structure: situation/role, specific accomplishments with impact, and a closing that ties to mission. Each accomplishment pairs an action with a measurable or concrete result.",
+      "config": {
+        "paragraphs": [
+          "role",
+          "accomplishments_with_impact",
+          "mission_tie_in"
+        ],
+        "requireActionPlusResult": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-mismatch",
+      "title": "Award-Level Mismatch Warning",
+      "category": "Validation",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "If the strength and scope of the narrative do not match the requested award level — routine duties written up for a high award, or career-defining impact under-recognized — CitationBuilder warns the user and suggests a more appropriate level. The app warns; it never silently changes the award.",
+      "config": {
+        "warnOnMismatch": true,
+        "autoChangeAward": false,
+        "suggestAppropriateLevel": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-ovsm",
+      "title": "OVSM Validation",
+      "category": "Validation",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "CitationBuilder validates the citation against OVSM expectations (Operational, Valor, Service, Meritorious as applicable) for the chosen award. Missing required elements are flagged with what to add.",
+      "config": {
+        "checks": [
+          "operational",
+          "valor",
+          "service",
+          "meritorious"
+        ],
+        "flagMissingElements": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-reality",
+      "title": "Reality Check",
+      "category": "Tone",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Also flag “heroically” and “valiantly” outside genuine valor awards.",
+      "config": {
+        "flagInflated": true,
+        "suggestRewrite": true,
+        "discouragedPhrases": [
+          "single-handedly",
+          "flawlessly",
+          "tirelessly",
+          "heroically",
+          "valiantly"
+        ]
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-unit-format",
+      "title": "Unit Name Formatting",
+      "category": "Formatting",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Unit names render in the standard, consistent format — full official name on first use, an approved short form thereafter — and dates use the standard military format. Consistency here is part of a clean package.",
+      "config": {
+        "dateFormat": "DD MMM YY",
+        "firstUseFullName": true,
+        "consistentShortForm": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-examples-influence",
+      "title": "How Examples Influence Output",
+      "category": "Tone",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Pasted example citations shape the style, tone, and structure of generated drafts — never the facts. The intake analysis decides whether new examples reinforce an existing rule, refine it, conflict with it, or suggest a new rule, and surfaces those as proposed changes.",
+      "config": {
+        "examplesGuideStyleNotFacts": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-ai-enhance",
+      "title": "AI Enhancement Behavior",
+      "category": "Tone",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "AI enhancement tightens and improves wording within the rules — it respects character limits, keeps the required structure, holds the tone to the award level, and never adds facts that were not provided. Enhancement is a suggestion the author accepts or rejects.",
+      "config": {
+        "addsFacts": false,
+        "authorApproves": true,
+        "respectsLimits": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-wf-intake",
+      "title": "Citation Intake Workflow",
+      "category": "Workflow",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The author enters the facts: awardee, rank, unit, period of service, the award being recommended, and the accomplishments. These inputs drive generation and validation.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-wf-generate",
+      "title": "Generate & Enhance Workflow",
+      "category": "Workflow",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "CitationBuilder generates a draft citation within the rules, then offers AI enhancement to tighten wording. The author reviews every change.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-wf-export",
+      "title": "Export Workflow",
+      "category": "Workflow",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Once the citation passes validation and the author is satisfied, CitationBuilder exports a correctly-formatted DOCX/PDF package. Export formatting is a protected area.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-f-award",
+      "title": "Award Type",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The award being recommended (e.g., NAM, NCM). Sets the character limit, OVSM expectations, and tone.",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-awardee",
+      "title": "Awardee",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The Marine being recognized.",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-unit",
+      "title": "Unit",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The Marine’s unit, rendered in the standard format.",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-period",
+      "title": "Period of Service",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The dates covered by the citation.",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-soa",
+      "title": "Summary of Action",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The detailed narrative of accomplishments and impact.",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-charcount",
+      "title": "Character Count",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The running length of the citation against the award’s hard limit.",
+      "config": {
+        "editable": false,
+        "inExports": false,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-examples",
+      "title": "Example Set",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Approved example citations pasted to guide style.",
+      "config": {
+        "editable": true,
+        "inExports": false,
+        "affectsScheduling": true
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-f-export",
+      "title": "Export Format",
+      "category": "Field",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "The output format of the final package (DOCX/PDF).",
+      "config": {
+        "editable": true,
+        "inExports": true,
+        "affectsScheduling": false
+      },
+      "tests": []
+    },
+    {
+      "id": "cb-alg-generate",
+      "title": "Citation Generation",
+      "category": "Algorithm",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Purpose: produce a draft citation that fits the rules. Process: from the entered facts and the active rules, CitationBuilder drafts the opening, SOA, and closing within the character limit, in the award-appropriate tone, guided by the example set.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-alg-validate",
+      "title": "Validation Pipeline",
+      "category": "Algorithm",
+      "status": "active",
+      "locked": false,
+      "plainEnglishRule": "Purpose: catch problems before submission. Process: the draft is checked against the character limit, OVSM expectations, award-level fit, and the reality-check language list, producing a list of warnings the author resolves.",
+      "config": {},
+      "tests": []
+    },
+    {
+      "id": "cb-out-export",
+      "title": "Export / Package Formatting",
+      "category": "Safety",
+      "status": "active",
+      "locked": true,
+      "plainEnglishRule": "The export builder renders the approved citation into the exact DOCX/PDF format the package requires. This formatting is protected: rule edits may describe export behavior, but code changes to the exporter should require explicit unlock/confirmation.",
+      "config": {},
+      "tests": []
+    }
+  ]
+}
