@@ -45,7 +45,7 @@ describe("CitationBuilder V1 award engine", () => {
 
   it.each([
     ["MMAST", "DURING THE PERIOD OF", "REFLECTED CREDIT", true],
-    ["CERTCOM", "EXCEPTIONAL PERFORMANCE", "REFLECTED GREAT CREDIT", true],
+    ["CERTCOM", "SUPERIOR PERFORMANCE", "REFLECTED CREDIT", true],
     ["NAM", "PROFESSIONAL ACHIEVEMENT", "REFLECTED CREDIT", false],
     ["NMC", "MERITORIOUS SERVICE", "REFLECTED CREDIT", false],
   ] satisfies Array<[AwardKey, string, string, boolean]>)("%s follows uppercase citation rules", (award, opening, closing, citationOnly) => {
@@ -53,6 +53,7 @@ describe("CitationBuilder V1 award engine", () => {
     const citation = assembleCitation(form);
     expect(citation).toContain(opening);
     expect(citation).toContain(closing);
+    if (award === "CERTCOM") expect(citation).not.toContain("REFLECTED GREAT CREDIT");
     expect(citation.replace(/[^A-Za-z]/g, "")).toBe(citation.replace(/[^A-Za-z]/g, "").toUpperCase());
     expect(AWARDS[award].citationOnly === true).toBe(citationOnly);
     if (AWARDS[award].maxChars) expect(citation.length).toBeLessThanOrEqual(AWARDS[award].maxChars);
@@ -95,6 +96,27 @@ describe("CitationBuilder V1 award engine", () => {
     expect(soa).not.toContain("BACKGROUND");
     expect(soa.replace(/[^A-Za-z]/g, "")).not.toBe(soa.replace(/[^A-Za-z]/g, "").toUpperCase());
     expect(citation.replace(/[^A-Za-z]/g, "")).toBe(citation.replace(/[^A-Za-z]/g, "").toUpperCase());
+  });
+
+  it("uses Barracks citation unit format and spells out company names", () => {
+    const form = makeForm("NAM", { unit: "A Company" });
+    const citation = assembleCitation(form);
+    expect(citation).toContain("ALPHA COMPANY, MARINE BARRACKS, WASHINGTON, D.C.,");
+    expect(citation).not.toMatch(/(?:^|[^A-Z])A COMPANY(?:[^A-Z]|$)/);
+  });
+
+  it("flags acronyms, unsupported higher-billet claims, and MSM senior-scope concerns", () => {
+    const form = makeForm("MSM", {
+      rank: "Sergeant",
+      additionalBillets: "Interim Company First Sergeant",
+      achievements: "Served as interim Company First Sergeant and improved DTS voucher processing for the section.",
+    });
+    const citation = assembleCitation(form);
+    const checks = runChecks(citation, buildSOA(form), form);
+    expect(checks.some((check) => check.title === "Higher-responsibility billet")).toBe(true);
+    expect(checks.some((check) => check.title === "Technical jargon")).toBe(true);
+    expect(checks.some((check) => check.title === "MSM senior-scope review")).toBe(true);
+    expect(checks.some((check) => check.title === "BksO 1650 timeline")).toBe(true);
   });
 
   it("redacts EDIPI and SSN-looking values from AI payloads", () => {

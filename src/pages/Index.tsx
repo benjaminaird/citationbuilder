@@ -100,7 +100,7 @@ const RANKS = [
 
 const AWARDS: Record<AwardKey, AwardConfig> = {
   MMAST:   { label: "Meritorious Mast",                       casing: "upper",    maxChars: 0,    target: null,          closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
-  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: true,  isLOA: false, citationOnly: true },
+  CERTCOM: { label: "Certificate of Commendation",            casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false, citationOnly: true },
   OVSM:    { label: "Outstanding Volunteer Service Medal",     casing: "sentence", maxChars: 0,    target: null,          closing: "loa",    greatCredit: true,  isLOA: true },
   NAM:     { label: "Navy & Marine Corps Achievement Medal",  casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
   NMC:     { label: "Navy & Marine Corps Commendation Medal", casing: "upper",    maxChars: 1250, target: [1200, 1245], closing: "lesser", greatCredit: false, isLOA: false },
@@ -118,7 +118,34 @@ const EXPANSIONS: Record<string, string> = {
   "1stLt": "First Lieutenant", "Capt": "Captain", "Maj": "Major", "LtCol": "Lieutenant Colonel",
   "NCOIC": "Noncommissioned Officer in Charge", "SNCOIC": "Staff Noncommissioned Officer in Charge",
   "CO": "Commanding Officer", "XO": "Executive Officer",
+  "MBW": "Marine Barracks, Washington, D.C.", "HQMC": "Headquarters Marine Corps",
+  "iAPS": "improved Awards Processing System", "IAPS": "improved Awards Processing System",
+  "DTS": "Defense Travel System", "BIC": "billet identification code",
 };
+
+const BARRACKS_TIMELINES: Partial<Record<AwardKey, { s1: number; co: number; hqmc?: number }>> = {
+  NAM: { s1: 45, co: 30 },
+  NMC: { s1: 60, co: 45 },
+  MSM: { s1: 90, co: 75, hqmc: 60 },
+  LOM: { s1: 180, co: 150, hqmc: 120 },
+};
+
+const CITATION_ACRONYM_PATTERNS: Array<[RegExp, string]> = [
+  [/\bMBW\b/i, "MBW"],
+  [/\bHQMC\b/i, "HQMC"],
+  [/\biAPS\b/i, "iAPS"],
+  [/\bIAPS\b/i, "IAPS"],
+  [/\bDTS\b/i, "DTS"],
+  [/\bBIC\b/i, "BIC"],
+  [/\bS-1\b/i, "S-1"],
+  [/\bOIC\b/i, "OIC"],
+  [/\bSNCOIC\b/i, "SNCOIC"],
+  [/\bNCOIC\b/i, "NCOIC"],
+  [/\bCO\b/i, "CO"],
+  [/\bXO\b/i, "XO"],
+];
+
+const TECHNICAL_JARGON = /\b(BIC|IAPS|iAPS|DTS|MOL|MCTIMS|ODSE|UDMIPS|PRASP|TFRS|unit diary|RUC|MCC)\b/i;
 
 // ---- Achievement Classification Keywords ----
 const CATEGORY_KEYWORDS: Record<Exclude<AchievementCategory, "Uncategorized">, RegExp[]> = {
@@ -576,7 +603,7 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
     title = "Possible award mismatch";
     detail = "The selected award may be high for the current rank, billet, and accomplishment scope.";
     recommendations.push(form.award === "NMC"
-      ? "This may support a Navy Comm if stronger command-level impact is added."
+      ? "This may support a Navy and Marine Corps Commendation Medal if stronger command-level impact is added."
       : `This package currently supports ${awardShortLabel(recommendedAward)}.`);
   }
 
@@ -584,7 +611,7 @@ function awardMatchScore(form: FormState, citation = ""): AwardMatchResult {
     severity = severity === "severe" ? "severe" : "possible";
     title = "Possible award mismatch";
     detail = "The selected award may be low for the rank, billet, and apparent scope entered.";
-    recommendations.push("This may be under-awarded; consider Navy Comm/MSM.");
+    recommendations.push("This may be under-awarded; consider a Navy and Marine Corps Commendation Medal or Meritorious Service Medal.");
   }
 
   if (!recommendations.length) {
@@ -822,11 +849,42 @@ function dateOrderError(form: FormState): string | null {
   return to.getTime() < from.getTime() ? "End date must be after start date." : null;
 }
 
+function serviceEndAgeDays(form: FormState): number | null {
+  if (!form.dateTo) return null;
+  const to = parseServiceDate(form.dateTo);
+  if (!to) return null;
+  const now = new Date();
+  const age = now.getTime() - to.getTime();
+  return age > 0 ? Math.floor(age / 86400000) : null;
+}
+
 function serviceMonths(form: FormState): number | null {
   const from = parseServiceDate(form.dateFrom);
   const to = parseServiceDate(form.dateTo);
   if (!from || !to || to.getTime() < from.getTime()) return null;
   return ((to.getFullYear() - from.getFullYear()) * 12) + (to.getMonth() - from.getMonth()) + 1;
+}
+
+function citationAcronyms(text: string): string[] {
+  return CITATION_ACRONYM_PATTERNS
+    .filter(([pattern]) => pattern.test(text))
+    .map(([, label]) => label);
+}
+
+function barracksTimelineDetail(award: AwardKey): string | null {
+  const timeline = BARRACKS_TIMELINES[award];
+  if (!timeline) return null;
+  const hqmc = timeline.hqmc ? ` HQMC: ${timeline.hqmc} days.` : "";
+  return `BksO 1650 planning timeline before presentation - S-1: ${timeline.s1} days; CO: ${timeline.co} days.${hqmc}`;
+}
+
+function higherResponsibilityNeedsDuration(form: FormState): boolean {
+  const text = `${form.additionalBillets} ${form.achievements}`;
+  const claimsHigher = /\b(acting|interim|temporary|served as|filled|higher responsibility|higher-level billet|collateral billet|additional billet)\b/i.test(text);
+  const hasConcreteDuration = /\b(?:for\s+)?\d+\s+(?:calendar\s+)?(?:days?|weeks?|months?)\b/i.test(text)
+    || /\bfrom\s+[A-Za-z0-9 ,/]+\s+(?:to|through)\s+[A-Za-z0-9 ,/]+\b/i.test(text)
+    || /\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\s+(?:to|through)\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}\b/i.test(text);
+  return claimsHigher && !hasConcreteDuration;
 }
 
 function applyCase(text: string, mode: "upper" | "sentence"): string {
@@ -899,13 +957,31 @@ function unitInSentence(unit: string): string {
   return cleanUnit === UNIT_PRESETS[0] ? UNIT_CANON : `${cleanUnit},`;
 }
 
+function displayCitationUnit(unit: string): string {
+  const cleanUnit = displayUnit(unit)
+    .replace(/^A Company$/i, "Alpha Company")
+    .replace(/^B Company$/i, "Bravo Company")
+    .replace(/U\.S\./g, "United States")
+    .replace(/\bMBW\b/g, "Marine Barracks, Washington, D.C.");
+
+  if (cleanUnit === displayUnit(UNIT_PRESETS[0]) || /Marine Barracks,\s*Washington,\s*D\.C\./i.test(cleanUnit)) {
+    return UNIT_CANON;
+  }
+
+  return `${cleanUnit}, ${UNIT_CANON}`;
+}
+
+function citationUnitInSentence(unit: string): string {
+  return displayCitationUnit(unit).replace(/,\s*$/g, ",");
+}
+
 function buildOpening(form: FormState): string {
   const p = PRONOUNS[form.pronoun];
   const billet = form.billet || "[Billet]";
   const from = form.dateFrom || "[Month Year]";
   const to = form.dateTo || "[Month Year]";
   const rl = rankLast(form);
-  const unit = unitInSentence(form.unit);
+  const unit = citationUnitInSentence(form.unit);
 
   switch (form.award) {
     case "MMAST":
@@ -915,7 +991,7 @@ function buildOpening(form: FormState): string {
     case "NMC":
       return `Meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "CERTCOM":
-      return `Exceptional performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}. ${rl} performed ${p.poss} demanding duties in an exemplary and highly professional manner.`;
+      return `Superior performance of ${p.poss} duties while serving as ${billet}, ${unit} from ${from} to ${to}. ${rl} performed ${p.poss} duties in an exemplary and highly professional manner.`;
     case "MSM":
       return `For outstanding meritorious service while serving as ${billet}, ${unit} from ${from} to ${to}.`;
     case "LOM":
@@ -1284,6 +1360,22 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
     checks.push({ status: "warn", title: issue.title, detail: issue.detail });
   }
   const months = serviceMonths(form);
+  const endAgeDays = serviceEndAgeDays(form);
+  if (endAgeDays !== null && endAgeDays > 365 * 3) {
+    checks.push({
+      status: "err",
+      title: "SECNAV timeliness",
+      detail: "Award nominations must normally be originated within three years of the act or end of meritorious service.",
+    });
+  }
+  const timelineDetail = barracksTimelineDetail(form.award);
+  if (timelineDetail) {
+    checks.push({
+      status: "ok",
+      title: "BksO 1650 timeline",
+      detail: timelineDetail,
+    });
+  }
   if ((form.award === "MSM" || form.award === "LOM") && months !== null && months < 18) {
     checks.push({
       status: "warn",
@@ -1296,6 +1388,34 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
       status: "warn",
       title: "Senior-scope impact",
       detail: "Higher awards are stronger when they show command-wide, installation-wide, national, international, senior-leader, or strategic visibility.",
+    });
+  }
+  if (form.award === "MSM" && rankSeniority(form.rank) < 4) {
+    checks.push({
+      status: "warn",
+      title: "MSM senior-scope review",
+      detail: "MBW guidance says MSMs typically go to senior officers and senior enlisted with impact comparable to a Battalion Commanding Officer, Sergeant Major, or senior staff leader; otherwise review for Navy and Marine Corps Commendation Medal.",
+    });
+  }
+  if ((form.award === "NMC" || form.award === "MSM" || form.award === "LOM")) {
+    checks.push({
+      status: "warn",
+      title: "Prior award stack review",
+      detail: "CitationBuilder cannot see prior awards. Originators should review the Marine's award history and ensure the recommendation is commensurate with rank, previous recognition, and scope of impact.",
+    });
+  }
+  if (higherResponsibilityNeedsDuration(form)) {
+    checks.push({
+      status: "warn",
+      title: "Higher-responsibility billet",
+      detail: "If citing service in a higher-responsibility billet, add concrete dates or duration, e.g. \"served for 114 days as the interim Company First Sergeant.\"",
+    });
+  }
+  if (TECHNICAL_JARGON.test(`${form.achievements} ${citation} ${soa}`)) {
+    checks.push({
+      status: "warn",
+      title: "Technical jargon",
+      detail: "Avoid technical jargon and staff-system shorthand; write for readers outside the billet and staff section.",
     });
   }
   checks.push(...analyzeRealityIssues(form));
@@ -1334,8 +1454,10 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
     const found = Object.keys(EXPANSIONS).filter((abbr) =>
       new RegExp("\\b" + abbr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(soa)
     );
-    checks.push(found.length
-      ? { status: "err", title: "Abbreviations present", detail: "Expand: " + found.join(", ") + ".", fixId: "fixAbbr" }
+    const acronyms = citationAcronyms(soa);
+    const foundAll = Array.from(new Set([...found, ...acronyms]));
+    checks.push(foundAll.length
+      ? { status: "err", title: "Abbreviations present", detail: "Expand: " + foundAll.join(", ") + ".", fixId: "fixAbbr" }
       : { status: "ok", title: "No abbreviations", detail: "Only \"Washington, D.C.\" abbreviated." }
     );
 
@@ -1396,8 +1518,10 @@ function runChecks(citation: string, soa: string, form: FormState): CheckItem[] 
   const found = Object.keys(EXPANSIONS).filter((abbr) =>
     new RegExp("\\b" + abbr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(citation)
   );
-  checks.push(found.length
-    ? { status: "err", title: "Abbreviations present", detail: "Expand: " + found.join(", ") + ".", fixId: "fixAbbr" }
+  const acronyms = citationAcronyms(citation);
+  const foundAll = Array.from(new Set([...found, ...acronyms]));
+  checks.push(foundAll.length
+    ? { status: "err", title: "Abbreviations present", detail: "Expand: " + foundAll.join(", ") + ".", fixId: "fixAbbr" }
     : { status: "ok", title: "No abbreviations", detail: "Only \"Washington, D.C.\" abbreviated." }
   );
 

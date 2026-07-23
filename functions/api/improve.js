@@ -62,12 +62,16 @@ function buildPrompt(body) {
     "- If the citation must be shortened, remove generic adjectives, filler phrases, and the weakest accomplishments before removing numbers or measurable impact.",
     "- Group related accomplishments by duty or topic so the citation and Summary of Action do not bounce between unrelated subjects.",
     "- Summary of Action text must remain paragraph-format normal prose, not ALL CAPS. Citation casing rules apply only to the citation.",
+    "- Citations must contain no acronyms, abbreviations, staff-system shorthand, or excessive technical jargon; spell out company and platoon names.",
+    "- When claiming service in a higher-responsibility billet, preserve concrete dates or duration and do not imply billet service that is not supported by the source facts.",
+    "- MSM recommendations should show senior-scope impact comparable to a Battalion Commanding Officer, Sergeant Major, or senior G-shop staff leader; otherwise favor Navy and Marine Corps Commendation Medal level language.",
+    "- The originator must review prior award history; do not overstate award level when the Marine has no lower-level award unless the facts show extreme or outsized impact.",
     "- Prioritize major leadership, quantified impact, duration, personnel, money or resources, command advisory, readiness, ceremonial or operational or community impact, and place routine professional development last.",
     "- When facts support it, retain public visibility and scope indicators such as national, international, diplomatic, presidential, state ceremony, senior military or civilian leader, battalion-wide, command-wide, and installation-wide impact.",
     "- Keep the award-specific citation frame: opening sentence first, accomplishment body second, standard credit/traditions closing last.",
     "- For Meritorious Mast and Certificate of Commendation, treat the output as a citation/certificate only; do not create or require a Summary of Action.",
     "- Meritorious Mast must remain ALL CAPS, use the mandatory 'DURING THE PERIOD OF ... THROUGH ...' opening, use an initiative/perseverance/total dedication closing, and fit the portrait certificate style of about 14 lines.",
-    "- Certificate of Commendation must remain ALL CAPS, use the mandatory 'EXCEPTIONAL PERFORMANCE OF ... DUTIES' opening, use a 'reflected great credit' closing, and fit the landscape certificate style of about 9 lines.",
+    "- Certificate of Commendation must remain ALL CAPS, use the mandatory 'SUPERIOR PERFORMANCE OF ... DUTIES' opening, use a standard 'reflected credit' closing without 'great' and fit the landscape certificate style of about 9 lines.",
   ].join("\n");
 
   const isUpper = ["MMAST", "NAM", "NMC", "CERTCOM"].includes(award);
